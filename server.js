@@ -1,6 +1,6 @@
 import compression from 'compression';
 import crypto from 'node:crypto';
-import * as archiverModule from 'archiver';
+import { ZipArchive } from 'archiver';
 import dns from 'node:dns';
 import express from 'express';
 import fsp from 'node:fs/promises';
@@ -16,9 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const archiver = typeof archiverModule.default === 'function'
-  ? archiverModule.default
-  : (format, options) => new archiverModule.Archiver(format, options);
+const createZipArchive = (options) => new ZipArchive(options);
 
 // 优先使用 IPv4，避免服务器无 IPv6 网络时 SMTP 等连接失败
 dns.setDefaultResultOrder('ipv4first');
@@ -945,7 +943,7 @@ async function createZipFromUploadedFiles(uploaded, targetPath) {
   try {
     await new Promise((resolve, reject) => {
       const output = fs.createWriteStream(targetPath, { mode: 0o600 });
-      const archive = archiver('zip', { zlib: { level: 3 } });
+      const archive = createZipArchive({ zlib: { level: 3 } });
       const usedNames = new Set();
 
       output.on('close', resolve);
