@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>登录 - JiahaoDrop</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="login-body">
+    <main class="login-screen">
+      <div class="login-card">
+        <button class="theme-toggle login-theme-toggle" type="button" aria-label="切换主题"><svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        <span class="logo large" aria-hidden="true"><span></span></span>
+        <h1 id="authTitle">登录</h1>
+        <p id="authHint">使用管理员创建的账号登录后发送文件。</p>
+
+        <form id="loginForm">
+          <div class="login-methods" id="loginMethods">
+            <button class="method-btn active" type="button" data-login-method="password">账号登录</button>
+            <button class="method-btn" type="button" data-login-method="email">邮箱登录</button>
+          </div>
+          <label id="usernameLabel">
+            用户名
+            <input id="usernameInput" name="username" autocomplete="username" required minlength="3" maxlength="32">
+          </label>
+          <label id="emailLabel" hidden>
+            邮箱
+            <input id="emailInput" name="email" type="email" autocomplete="email" placeholder="用于接收验证码">
+          </label>
+          <label id="passwordLabel">
+            密码
+            <input id="passwordInput" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+          </label>
+          <label id="setupEmailLabel" hidden>
+            管理员邮箱
+            <input id="setupEmailInput" name="setupEmail" type="email" autocomplete="email" placeholder="用于登录邮箱验证码">
+          </label>
+          <label id="initTokenLabel" hidden>
+            初始化令牌
+            <input id="initTokenInput" name="initToken" autocomplete="off" placeholder="服务器环境变量 INIT_TOKEN 中设置的令牌">
+          </label>
+          <p class="form-hint" id="initTokenHint" hidden></p>
+          <label id="captchaLabel">
+            人机验证
+            <div class="captcha-row">
+              <span class="captcha-box" id="captchaQuestion">加载中</span>
+              <button class="small-btn" id="refreshCaptchaBtn" type="button">刷新</button>
+            </div>
+            <input id="captchaInput" name="captcha" inputmode="numeric" autocomplete="off" placeholder="请输入验证码" required>
+          </label>
+          <label id="emailCodeLabel" hidden>
+            邮箱验证码
+            <input id="emailCodeInput" name="emailCode" inputmode="numeric" autocomplete="one-time-code" placeholder="请输入 6 位邮箱验证码">
+          </label>
+          <p class="form-hint" id="emailCodeHint" hidden></p>
+          <button class="primary" type="submit" id="authSubmit">登录</button>
+        </form>
+
+        <div class="login-toggle" id="loginToggle">
+          <span id="toggleText">没有账号？</span>
+          <button type="button" id="toggleBtn" class="link-btn">注册新账号</button>
+        </div>
+        <a class="login-back" href="/">← 返回首页</a>
+      </div>
+    </main>
+
+    <footer class="site-footer" data-brand="icp">豫ICP备2023027149号-2</footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/shared.js" defer></script>
+    <script src="/login.js" defer></script>
+  </body>
+</html>

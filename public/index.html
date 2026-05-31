@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JiahaoDrop 快传</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="home-body">
+    <header class="home-topbar">
+      <a class="brand home-brand" href="/" aria-label="JiahaoDrop 首页">
+        <span class="logo" aria-hidden="true"><span></span></span>
+        <strong data-brand="siteName" data-suffix=" 快传">JiahaoDrop 快传</strong>
+      </a>
+      <div class="notice-sm" data-brand="legal">上传违法违规内容将承担法律责任</div>
+      <div class="home-topbar-actions">
+        <button class="theme-toggle" type="button" aria-label="切换主题"><svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        <a class="home-login-btn" href="/login">登录</a>
+        <a class="home-register-btn" href="/login?mode=register" id="registerLink" hidden>注册</a>
+      </div>
+    </header>
+
+    <main class="home-hero">
+      <span class="logo huge" aria-hidden="true"><span></span></span>
+      <h1 data-brand="siteName">JiahaoDrop</h1>
+      <p class="subtitle">轻量级安全文件快传</p>
+
+      <section class="home-dock-wrap">
+        <div class="receive-pill" id="receivePill" aria-label="免登录接收文件">
+          <span class="pill-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 5v14M5 12l7 7 7-7"/>
+            </svg>
+            输入接收码
+          </span>
+          <div class="pill-expand">
+            <input id="codeInput" placeholder="例如 8H2K9M" maxlength="6" autocomplete="off" spellcheck="false">
+            <button class="pill-submit" id="receiveBtn" type="button">接收</button>
+          </div>
+        </div>
+        <p class="pill-hint" id="pillHint">悬停或点击后显示输入框，无需登录即可接收</p>
+        <p class="pill-error" id="pillError" hidden></p>
+      </section>
+
+      <p class="home-upload-hint" id="uploadHint" hidden>需要上传文件？请先<a href="/login">登录</a>或<a href="/login?mode=register">注册</a>账号</p>
+    </main>
+
+    <footer class="home-footer site-footer" data-brand="icp">豫ICP备2023027149号-2</footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/shared.js" defer></script>
+    <script src="/home.js" defer></script>
+  </body>
+</html>

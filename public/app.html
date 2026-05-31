@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JiahaoDrop 快传</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="app-body">
+    <header class="topbar app-topbar">
+      <a class="brand" href="/app" aria-label="JiahaoDrop 快传">
+        <span class="logo" aria-hidden="true"><span></span></span>
+        <strong data-brand="siteName" data-suffix=" 快传">JiahaoDrop 快传</strong>
+      </a>
+      <nav class="nav app-nav" id="mainNav">
+        <div class="nav-cluster">
+          <button class="nav-btn active" data-view="send" data-route="/app/send" type="button">发送</button>
+          <button class="nav-btn" data-view="receive" data-route="/app/receive" type="button">接收</button>
+          <button class="nav-btn" data-view="files" data-route="/app/files" type="button">我的文件</button>
+          <button class="nav-btn" data-view="account" type="button">账号</button>
+          <a class="nav-link admin-only" href="/admin" hidden>设置</a>
+        </div>
+        <div class="nav-account">
+          <button class="theme-toggle" type="button" aria-label="切换主题"><svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg><svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+          <span class="avatar" id="avatar" aria-hidden="true">J</span>
+          <span class="account-badge" id="accountBadge"></span>
+          <button class="nav-link logout-link" id="logoutBtn" type="button">退出登录</button>
+        </div>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="app-screen" id="appView" hidden>
+        <div class="hero">
+          <span class="logo hero-logo" aria-hidden="true"><span></span></span>
+          <div>
+            <h1 data-brand="siteName">JiahaoDrop</h1>
+            <p id="welcomeText">欢迎回来</p>
+          </div>
+        </div>
+        <section class="view active" id="sendView">
+          <div class="upload-zone" id="dropZone">
+            <input id="fileInput" type="file" multiple hidden>
+            <div class="upload-icon">+</div>
+            <h2>拖拽文件到这里</h2>
+            <p id="uploadLimit">或点击选择文件</p>
+            <button class="primary" id="pickBtn" type="button">选择文件</button>
+          </div>
+          <div class="selected-list" id="selectedList" hidden></div>
+          <div class="retention-row" id="retentionRow" hidden>
+            <label>有效期
+              <select id="retentionSelect">
+                <option value="48">48 小时（默认）</option>
+                <option value="24">24 小时</option>
+                <option value="16">16 小时</option>
+                <option value="8">8 小时</option>
+                <option value="4">4 小时</option>
+                <option value="2">2 小时</option>
+                <option value="1">1 小时</option>
+              </select>
+            </label>
+            <label>下载次数
+              <input id="maxDownloadsInput" type="number" min="0" max="100000" step="1" value="0" placeholder="0 表示不限">
+            </label>
+          </div>
+          <button class="primary wide" id="uploadBtn" type="button" disabled hidden>开始上传</button>
+          <p class="upload-legal-tip" data-brand="legal">请勿传输违法违规内容，所有操作均记录审计日志。</p>
+          <div class="upload-results-toolbar">
+            <h3>最近上传</h3>
+            <button class="small-btn" id="toggleUploadResultsBtn" type="button" hidden>展开全部</button>
+          </div>
+          <div class="result-grid" id="uploadResults"></div>
+        </section>
+
+        <section class="view" id="receiveView">
+          <div class="receive-panel">
+            <h2>输入接收码</h2>
+            <p>也可以把接收码发给未登录用户，让对方在首页直接接收。</p>
+            <form class="code-form" id="codeForm">
+              <input id="codeInput" placeholder="例如 8H2K9M" maxlength="6" autocomplete="off" required>
+              <button class="primary" type="submit">查询</button>
+            </form>
+            <p class="field-error" id="codeError" hidden></p>
+            <div id="codeResult"></div>
+          </div>
+        </section>
+
+        <section class="view" id="filesView">
+          <div class="section-head">
+            <div>
+              <h2>我的文件</h2>
+              <p>管理员可查看并删除自己发送的文件。</p>
+            </div>
+            <button class="ghost" id="refreshFilesBtn" type="button">刷新</button>
+          </div>
+          <div class="file-list" id="fileList"></div>
+        </section>
+
+        <section class="view" id="accountView">
+          <div class="section-head">
+            <div>
+              <h2>账号设置</h2>
+              <p>管理你的账号信息。</p>
+            </div>
+          </div>
+          <div class="account-card">
+            <div class="account-info">
+              <span class="avatar large" id="accountAvatar" aria-hidden="true">J</span>
+              <div>
+                <h3 id="accountUsername"></h3>
+                <p class="meta" id="accountRole"></p>
+              </div>
+            </div>
+            <div class="account-section account-email-row">
+              <div>
+                <h4>绑定邮箱</h4>
+                <p class="meta" id="currentEmail">未绑定邮箱</p>
+              </div>
+              <button class="small-btn" id="changeEmailBtn" type="button">修改邮箱</button>
+            </div>
+            <div id="emailChangeForm" hidden>
+              <label>
+                新邮箱
+                <input id="newEmailInput" type="email" placeholder="输入新邮箱地址">
+              </label>
+              <label>
+                人机验证
+                <div class="captcha-row">
+                  <span class="captcha-box" id="accountCaptchaQuestion">加载中</span>
+                  <button class="small-btn" id="accountRefreshCaptchaBtn" type="button">刷新</button>
+                </div>
+                <input id="accountCaptchaInput" inputmode="numeric" autocomplete="off" placeholder="请输入验证码">
+              </label>
+              <label id="emailChangeCodeLabel" hidden>
+                邮箱验证码
+                <input id="emailChangeCodeInput" inputmode="numeric" autocomplete="one-time-code" placeholder="请输入 6 位验证码">
+              </label>
+              <p class="form-hint" id="emailChangeHint" hidden></p>
+              <div class="actions left">
+                <button class="primary" id="submitEmailChangeBtn" type="button">发送验证码</button>
+                <button class="small-btn" id="cancelEmailChangeBtn" type="button">取消</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="site-footer" data-brand="icp">豫ICP备2023027149号-2</footer>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/shared.js" defer></script>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
