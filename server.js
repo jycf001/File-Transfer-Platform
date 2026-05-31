@@ -1,6 +1,6 @@
 import compression from 'compression';
 import crypto from 'node:crypto';
-import { ZipArchive } from 'archiver';
+import * as archiverModule from 'archiver';
 import dns from 'node:dns';
 import express from 'express';
 import fsp from 'node:fs/promises';
@@ -16,7 +16,13 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const createZipArchive = (options) => new ZipArchive(options);
+// archiver v8 用 ZipArchive 类，v6/v7 用 archiver('zip') 函数
+const createZipArchive = (options) => {
+  if (typeof archiverModule.ZipArchive === 'function') return new archiverModule.ZipArchive(options);
+  if (typeof archiverModule.default === 'function') return archiverModule.default('zip', options);
+  if (typeof archiverModule.Archiver === 'function') return new archiverModule.Archiver('zip', options);
+  throw new Error('archiver 版本不兼容，请升级到 v6 以上: npm install archiver@latest');
+};
 
 // 优先使用 IPv4，避免服务器无 IPv6 网络时 SMTP 等连接失败
 dns.setDefaultResultOrder('ipv4first');
