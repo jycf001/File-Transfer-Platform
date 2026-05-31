@@ -238,7 +238,7 @@ function maxDownloadsValue() {
 function downloadLimitText(file) {
   const max = Number(file.maxDownloads || 0);
   const count = Number(file.downloadCount || 0);
-  if (max <= 0) return `下载 ${count} 次 · 不限次数`;
+  if (max <= 0) return count > 0 ? `已下载 ${count} 次 · 不限` : '不限次数';
   const remaining = Math.max(max - count, 0);
   return `下载 ${count}/${max} 次 · 剩余 ${remaining} 次`;
 }
