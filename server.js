@@ -759,6 +759,7 @@ function parseRetentionHours(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return getRetentionHours();
   const hours = Math.round(number);
+  if (hours === 0) return 0; // 0 表示永久保留
   if (hours < 1 || hours > 720) return getRetentionHours();
   return hours;
 }
@@ -1046,7 +1047,10 @@ function filePathFor(fileOrStoredName) {
 }
 
 function isExpiredFile(file) {
-  return Boolean(file.deletedAt) || Date.now() > new Date(file.expiresAt).getTime();
+  if (file.deletedAt) return true;
+  if (file.retentionHours === 0) return false; // 永久保留
+  if (!file.expiresAt) return false;
+  return Date.now() > new Date(file.expiresAt).getTime();
 }
 
 function recordDownload(file, req) {
@@ -2286,7 +2290,7 @@ app.patch('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   if (req.body.retentionHours !== undefined) {
     const retentionHours = parseRetentionHours(req.body.retentionHours);
     file.retentionHours = retentionHours;
-    file.expiresAt = addHours(nowIso(), retentionHours);
+    file.expiresAt = retentionHours === 0 ? null : addHours(nowIso(), retentionHours);
   }
   if (req.body.maxDownloads !== undefined) {
     file.maxDownloads = validateMaxDownloads(req.body.maxDownloads);

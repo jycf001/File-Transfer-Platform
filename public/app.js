@@ -348,12 +348,13 @@ async function loadFiles() {
     }
     elements.fileList.innerHTML = result.files.map((file) => {
       const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
-      const retention = file.retentionHours || 48;
+      const retention = file.retentionHours ?? 48;
+      const retentionText = retention === 0 ? '永久保留' : `${retention}小时后过期`;
       return `
         <div class="item">
           <div>
             <h3>${escapeHtml(file.name)}</h3>
-            <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retention)}小时后过期 · <span class="dl-count">${escapeHtml(downloadLimitText(file))}</span></div>
+            <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText)} · <span class="dl-count">${escapeHtml(downloadLimitText(file))}</span></div>
             <div class="meta share-line">${escapeHtml(shareUrl)}</div>
           </div>
           <div class="actions">
@@ -427,9 +428,11 @@ function showFileManage(file) {
         <label>
           有效期
           <select name="retentionHours">
+            <option value="0">永久保留</option>
+            <option value="720">从现在起 720 小时（30 天）</option>
+            <option value="168">从现在起 168 小时（7 天）</option>
             <option value="48">从现在起 48 小时</option>
             <option value="24">从现在起 24 小时</option>
-            <option value="16">从现在起 16 小时</option>
             <option value="8">从现在起 8 小时</option>
             <option value="4">从现在起 4 小时</option>
             <option value="2">从现在起 2 小时</option>
@@ -440,7 +443,7 @@ function showFileManage(file) {
           下载次数
           <input name="maxDownloads" type="number" min="0" max="100000" step="1" value="${Number(file.maxDownloads || 0)}" placeholder="0 表示不限">
         </label>
-        <p class="form-hint">保存后有效期会从当前时间重新计算，下载次数填 0 表示不限。</p>
+        <p class="form-hint">选择「永久保留」则文件不会自动过期。保存后有效期会从当前时间重新计算，下载次数填 0 表示不限。</p>
         <div class="actions left">
           <button class="primary" type="submit">保存</button>
           <button class="small-btn modal-close" type="button">取消</button>
@@ -449,7 +452,7 @@ function showFileManage(file) {
     </div>
   `;
   const select = overlay.querySelector('select[name="retentionHours"]');
-  if (select) select.value = String(file.retentionHours || 48);
+  if (select) select.value = String(file.retentionHours ?? 48);
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay || e.target.closest('.modal-close')) overlay.remove();
   });
