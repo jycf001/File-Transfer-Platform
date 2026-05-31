@@ -18,6 +18,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const archiver = archiverModule.default || archiverModule;
 
+// 优先使用 IPv4，避免服务器无 IPv6 网络时 SMTP 等连接失败
+dns.setDefaultResultOrder('ipv4first');
+
 function loadDotEnv() {
   const envFile = path.join(__dirname, '.env');
   try {
