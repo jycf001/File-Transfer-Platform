@@ -96,6 +96,29 @@
             <button class="ghost" id="refreshFilesBtn" type="button">刷新</button>
           </div>
           <div class="file-list" id="fileList"></div>
+          <div id="allUsersFilesSection" class="super-admin-only" hidden>
+            <div class="section-head">
+              <div>
+                <h2>用户文件</h2>
+                <p>查看所有用户上传的文件。</p>
+              </div>
+              <button class="ghost" id="refreshAllUsersBtn" type="button">刷新</button>
+            </div>
+            <div class="file-list" id="allUsersList"></div>
+          </div>
+          <div id="userFilesDetailSection" hidden>
+            <div class="section-head">
+              <div>
+                <h2 id="userFilesTitle">用户文件</h2>
+                <p id="userFilesSubtitle"></p>
+              </div>
+              <div class="actions">
+                <button class="ghost" id="backToUsersBtn" type="button">返回用户列表</button>
+                <button class="ghost" id="refreshUserFilesBtn" type="button">刷新</button>
+              </div>
+            </div>
+            <div class="file-list" id="userFilesList"></div>
+          </div>
         </section>
 
         <section class="view" id="accountView">

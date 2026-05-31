@@ -2262,6 +2262,51 @@ app.get('/api/files', requireAuth, asyncRoute(async (req, res) => {
   res.json({ files });
 }));
 
+// 超级管理员：查看所有用户文件概况
+app.get('/api/admin/all-files', requireAuth, requireSuperAdmin, asyncRoute(async (req, res) => {
+  await cleanupExpired();
+  const users = state.users
+    .filter((u) => !u.disabled)
+    .map((u) => {
+      const userFiles = state.files.filter((f) => f.ownerId === u.id && !isExpiredFile(f));
+      return {
+        id: u.id,
+        username: u.username,
+        role: u.role,
+        fileCount: userFiles.length,
+        totalSize: userFiles.reduce((sum, f) => sum + Number(f.size || 0), 0)
+      };
+    })
+    .filter((u) => u.fileCount > 0)
+    .sort((a, b) => b.fileCount - a.fileCount);
+  res.json({ users });
+}));
+
+// 超级管理员：查看指定用户的文件列表
+app.get('/api/admin/users/:userId/files', requireAuth, requireSuperAdmin, asyncRoute(async (req, res) => {
+  await cleanupExpired();
+  const targetUser = state.users.find((u) => u.id === req.params.userId);
+  if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+  const files = state.files
+    .filter((f) => f.ownerId === targetUser.id && !isExpiredFile(f))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map((file) => ({
+      id: file.id,
+      code: file.code,
+      name: file.originalName,
+      size: file.size,
+      createdAt: file.createdAt,
+      expiresAt: file.expiresAt,
+      retentionHours: file.retentionHours || getRetentionHours(),
+      downloadCount: downloadCountFor(file),
+      maxDownloads: normalizeMaxDownloads(file.maxDownloads),
+      remainingDownloads: downloadsRemaining(file),
+      shareUrl: shareUrlFor(file.code, req),
+      ownerId: file.ownerId
+    }));
+  res.json({ user: { id: targetUser.id, username: targetUser.username, role: targetUser.role }, files });
+}));
+
 app.get('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   const file = state.files.find((item) => item.id === req.params.id);
   if (!file) return res.status(404).json({ error: '文件不存在' });

@@ -51,7 +51,16 @@ const elements = {
   emailChangeCodeInput: $('#emailChangeCodeInput'),
   emailChangeHint: $('#emailChangeHint'),
   submitEmailChangeBtn: $('#submitEmailChangeBtn'),
-  cancelEmailChangeBtn: $('#cancelEmailChangeBtn')
+  cancelEmailChangeBtn: $('#cancelEmailChangeBtn'),
+  allUsersFilesSection: $('#allUsersFilesSection'),
+  allUsersList: $('#allUsersList'),
+  refreshAllUsersBtn: $('#refreshAllUsersBtn'),
+  userFilesDetailSection: $('#userFilesDetailSection'),
+  userFilesTitle: $('#userFilesTitle'),
+  userFilesSubtitle: $('#userFilesSubtitle'),
+  userFilesList: $('#userFilesList'),
+  backToUsersBtn: $('#backToUsersBtn'),
+  refreshUserFilesBtn: $('#refreshUserFilesBtn')
 };
 
 state.selectedFiles = [];
@@ -371,6 +380,76 @@ async function loadFiles() {
   } catch (error) {
     toast(error.message);
   }
+  // 超级管理员显示用户文件列表
+  if (state.user.role === 'super_admin' && elements.allUsersFilesSection) {
+    elements.allUsersFilesSection.hidden = false;
+    elements.userFilesDetailSection.hidden = true;
+    loadAllUsersFiles();
+  }
+}
+
+// 超级管理员：加载所有用户文件概况
+async function loadAllUsersFiles() {
+  if (state.user.role !== 'super_admin') return;
+  try {
+    const result = await api('/api/admin/all-files');
+    if (result.users.length === 0) {
+      elements.allUsersList.innerHTML = '<div class="item"><div><h3>暂无用户文件</h3><div class="meta">其他用户上传文件后会显示在这里。</div></div></div>';
+      return;
+    }
+    elements.allUsersList.innerHTML = result.users.map((u) => `
+      <div class="item">
+        <div>
+          <h3>${escapeHtml(u.username)} <span class="badge">${escapeHtml(roleLabel(u.role))}</span></h3>
+          <div class="meta">${escapeHtml(u.fileCount)} 个文件 · ${escapeHtml(formatSize(u.totalSize))}</div>
+        </div>
+        <div class="actions">
+          <button class="small-btn" data-view-user-files="${escapeHtml(u.id)}" data-username="${escapeHtml(u.username)}" type="button">查看文件</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+// 超级管理员：加载指定用户的文件列表
+let currentViewingUserId = '';
+async function loadUserFiles(userId, username) {
+  currentViewingUserId = userId;
+  elements.allUsersFilesSection.hidden = true;
+  elements.userFilesDetailSection.hidden = false;
+  elements.userFilesTitle.textContent = `${username} 的文件`;
+  elements.userFilesSubtitle.textContent = `查看该用户上传和分享的文件。`;
+  try {
+    const result = await api(`/api/admin/users/${encodeURIComponent(userId)}/files`);
+    if (result.files.length === 0) {
+      elements.userFilesList.innerHTML = '<div class="item"><div><h3>该用户暂无文件</h3></div></div>';
+      return;
+    }
+    elements.userFilesList.innerHTML = result.files.map((file) => {
+      const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
+      const retention = file.retentionHours ?? 48;
+      const retentionText = retention === 0 ? '永久保留' : `${retention}小时后过期`;
+      return `
+        <div class="item">
+          <div>
+            <h3>${escapeHtml(file.name)}</h3>
+            <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText)} · <span class="dl-count">${escapeHtml(downloadLimitText(file))}</span></div>
+            <div class="meta share-line">${escapeHtml(shareUrl)}</div>
+          </div>
+          <div class="actions">
+            <button class="small-btn" data-copy="${escapeHtml(file.code)}" type="button">复制接收码</button>
+            <button class="small-btn" data-copy="${escapeHtml(shareUrl)}" type="button">复制链接</button>
+            <a class="small-btn" href="/api/public/files/code/${encodeURIComponent(file.code)}/download">下载</a>
+            <button class="small-btn danger" data-delete-file="${escapeHtml(file.id)}" type="button">删除</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 function showFileDetail(file) {
@@ -479,6 +558,22 @@ function showFileManage(file) {
 
 elements.refreshFilesBtn.addEventListener('click', loadFiles);
 
+// 超级管理员：用户文件相关事件
+if (elements.refreshAllUsersBtn) elements.refreshAllUsersBtn.addEventListener('click', loadAllUsersFiles);
+if (elements.backToUsersBtn) elements.backToUsersBtn.addEventListener('click', () => {
+  elements.allUsersFilesSection.hidden = false;
+  elements.userFilesDetailSection.hidden = true;
+  currentViewingUserId = '';
+  loadAllUsersFiles();
+});
+if (elements.refreshUserFilesBtn) elements.refreshUserFilesBtn.addEventListener('click', () => {
+  if (currentViewingUserId) {
+    const title = elements.userFilesTitle.textContent;
+    const username = title.replace(' 的文件', '');
+    loadUserFiles(currentViewingUserId, username);
+  }
+});
+
 document.addEventListener('click', async (event) => {
   const removeSelected = event.target.closest('[data-remove-selected]');
   if (removeSelected) {
@@ -496,6 +591,12 @@ document.addEventListener('click', async (event) => {
     } catch {
       toast('复制失败，请手动复制');
     }
+  }
+
+  const viewUserFiles = event.target.closest('[data-view-user-files]');
+  if (viewUserFiles) {
+    loadUserFiles(viewUserFiles.dataset.viewUserFiles, viewUserFiles.dataset.username);
+    return;
   }
 
   const fileDetail = event.target.closest('[data-file-detail]');

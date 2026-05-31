@@ -760,6 +760,13 @@ label {
   margin: 18px auto 0;
 }
 
+#allUsersFilesSection,
+#userFilesDetailSection {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
 .selected-list {
   max-height: 340px;
   overflow: auto;
