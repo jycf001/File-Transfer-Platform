@@ -624,6 +624,25 @@ label {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+.shell::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shell::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 3px;
+}
+
+.shell::-webkit-scrollbar-thumb:hover {
+  background: var(--subtle);
 }
 
 .hero,

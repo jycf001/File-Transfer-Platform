@@ -96,6 +96,10 @@ function modeFromPath() {
 function setMode(mode, push = true) {
   $$('.nav-btn').forEach((button) => button.classList.toggle('active', button.dataset.view === mode));
   $$('.view').forEach((view) => view.classList.toggle('active', view.id === `${mode}View`));
+  const hero = $('.app-screen .hero');
+  if (hero) hero.style.display = mode === 'send' ? '' : 'none';
+  const shell = $('.shell');
+  if (shell) shell.scrollTop = 0;
   const route = $(`.nav-btn[data-view="${mode}"]`)?.dataset.route || '/app/send';
   if (push && window.location.pathname !== route) history.pushState({ mode }, '', route);
   if (mode === 'send') loadRecentUploads();
