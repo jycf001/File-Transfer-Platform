@@ -126,7 +126,7 @@ function setMode(mode, push = true) {
 
 function syncRetentionOptions() {
   if (!elements.retentionSelect) return;
-  const defaultHours = Number(state.limits.retentionHours || 48);
+  const defaultHours = Number(state.limits.retentionHours ?? 48);
   const existing = Array.from(elements.retentionSelect.options).some((option) => Number(option.value) === defaultHours);
   if (!existing) {
     const option = document.createElement('option');
@@ -199,7 +199,7 @@ elements.dropZone.addEventListener('drop', (event) => {
 
 function renderSelectedFiles() {
   const files = state.selectedFiles;
-  const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload || 10));
+  const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload ?? 10));
   const tooMany = files.length > maxFiles;
   const hasFiles = files.length > 0;
   elements.uploadBtn.disabled = !hasFiles || tooMany;
@@ -250,13 +250,13 @@ function retentionText(file) {
 
 elements.uploadBtn.addEventListener('click', async () => {
   if (state.selectedFiles.length === 0) return;
-  const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload || 10));
+  const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload ?? 10));
   if (state.selectedFiles.length > maxFiles) {
     toast(`单次最多上传 ${maxFiles} 个文件`);
     renderSelectedFiles();
     return;
   }
-  const maxFileSizeMb = Number(state.limits.maxFileSizeMb || 512);
+  const maxFileSizeMb = Number(state.limits.maxFileSizeMb ?? 512);
   const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
   const oversized = state.selectedFiles.filter((file) => file.size > maxFileSizeBytes);
   if (oversized.length > 0) {
@@ -341,7 +341,6 @@ elements.uploadBtn.addEventListener('click', async () => {
       xhr.ontimeout = () => reject(new Error('上传超时，文件可能过大或服务器处理时间过长'));
       xhr.send(formData);
     });
-    state.storageUsedBytes += totalSize;
     state.selectedFiles = [];
     elements.fileInput.value = '';
     renderSelectedFiles();
@@ -520,8 +519,10 @@ async function loadAllUsersFiles() {
 
 // 超级管理员：加载指定用户的文件列表
 let currentViewingUserId = '';
+let currentViewingUsername = '';
 async function loadUserFiles(userId, username) {
   currentViewingUserId = userId;
+  currentViewingUsername = username;
   elements.allUsersFilesSection.hidden = true;
   elements.userFilesDetailSection.hidden = false;
   elements.userFilesTitle.textContent = `${username} 的文件`;
@@ -636,7 +637,17 @@ function showFileManage(file) {
     </div>
   `;
   const select = overlay.querySelector('select[name="retentionHours"]');
-  if (select) select.value = String(file.retentionHours ?? 48);
+  if (select) {
+    const val = String(file.retentionHours ?? 48);
+    const exists = Array.from(select.options).some((o) => o.value === val);
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = file.retentionHours === 0 ? '永久保留' : `${val} 小时（当前）`;
+      select.prepend(opt);
+    }
+    select.value = val;
+  }
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay || e.target.closest('.modal-close')) overlay.remove();
   });
@@ -647,8 +658,8 @@ function showFileManage(file) {
       await api(`/api/files/${file.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          retentionHours: form.get('retentionHours'),
-          maxDownloads: Number(form.get('maxDownloads') || 0)
+          retentionHours: Number(form.get('retentionHours')),
+          maxDownloads: Number(form.get('maxDownloads') ?? 0)
         })
       });
       toast('文件设置已更新');
@@ -673,9 +684,7 @@ if (elements.backToUsersBtn) elements.backToUsersBtn.addEventListener('click', (
 });
 if (elements.refreshUserFilesBtn) elements.refreshUserFilesBtn.addEventListener('click', () => {
   if (currentViewingUserId) {
-    const title = elements.userFilesTitle.textContent;
-    const username = title.replace(' 的文件', '');
-    loadUserFiles(currentViewingUserId, username);
+    loadUserFiles(currentViewingUserId, currentViewingUsername);
   }
 });
 

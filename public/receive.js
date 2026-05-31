@@ -107,4 +107,5 @@ bootstrap().then(() => {
 }).catch(() => {
   const code = codeFromPath();
   if (code) loadFile(code);
+  else showError('加载失败', '无法连接服务器');
 });

@@ -165,7 +165,7 @@ function checkBruteForce(ip) {
   const record = bruteForceStore.get(ip);
   if (!record) return false;
   if (record.blockedUntil && now > record.blockedUntil) {
-    bruteForceStore.delete(ip);
+    bruteForceStore.set(ip, { count: 0, firstAt: now, blockedUntil: null, lockCount: record.lockCount || 0 });
     return false;
   }
   if (record.blockedUntil && now <= record.blockedUntil) return true;
@@ -639,7 +639,7 @@ function validateMaxFileSizeMb(value) {
 }
 
 function getMaxFileSizeMb() {
-  return validateMaxFileSizeMb(state.settings.maxFileSizeMb === undefined ? config.maxFileSizeMb : state.settings.maxFileSizeMb);
+  return normalizeMaxFileSizeMb(state.settings.maxFileSizeMb === undefined ? config.maxFileSizeMb : state.settings.maxFileSizeMb);
 }
 
 function normalizeStorageQuotaMb(value) {
@@ -792,7 +792,7 @@ function publicFilePayload(file, req) {
     size: file.size,
     createdAt: file.createdAt,
     expiresAt: file.expiresAt,
-    retentionHours: file.retentionHours || getRetentionHours(),
+    retentionHours: file.retentionHours ?? getRetentionHours(),
     downloadCount,
     maxDownloads,
     remainingDownloads,
@@ -870,11 +870,13 @@ async function handleFileDownload(file, req, res, { byCode = false, isPublic = f
   const needsCount = maxDownloads > 0;
   // Per-file lock: make check-and-increment atomic to prevent TOCTOU race
   if (needsCount) {
+    let downloadRequestId = null;
     const allowed = await withDownloadLock(file.id, async () => {
       if (!hasDownloadsRemaining(file)) return false;
       if (!file.downloadLog) file.downloadLog = [];
       file.downloadCount = downloadCountFor(file) + 1;
-      file.downloadLog.push({ ip: clientIp(req), at: nowIso(), pending: true });
+      downloadRequestId = randomId(8);
+      file.downloadLog.push({ ip: clientIp(req), at: nowIso(), pending: true, requestId: downloadRequestId });
       file.downloadLog = file.downloadLog.slice(-maxDownloadLogEntries);
       await saveState();
       return true;
@@ -898,8 +900,8 @@ async function handleFileDownload(file, req, res, { byCode = false, isPublic = f
   });
   if (!transferred) {
     // 传输失败，回滚预占的下载次数
-    if (needsCount && file.downloadLog) {
-      const pendingIdx = file.downloadLog.findIndex((e) => e.pending && e.ip === clientIp(req));
+    if (needsCount && file.downloadLog && downloadRequestId) {
+      const pendingIdx = file.downloadLog.findIndex((e) => e.pending && e.requestId === downloadRequestId);
       if (pendingIdx !== -1) file.downloadLog.splice(pendingIdx, 1);
       file.downloadCount = downloadCountFor(file);
       await saveState();
@@ -907,8 +909,8 @@ async function handleFileDownload(file, req, res, { byCode = false, isPublic = f
     return;
   }
   // 传输成功，清除 pending 标记
-  if (needsCount && file.downloadLog) {
-    const entry = file.downloadLog.find((e) => e.pending && e.ip === clientIp(req));
+  if (needsCount && file.downloadLog && downloadRequestId) {
+    const entry = file.downloadLog.find((e) => e.pending && e.requestId === downloadRequestId);
     if (entry) delete entry.pending;
   }
   addLog(isPublic ? 'files.public_downloaded' : 'files.downloaded', req, { fileId: file.id, byCode, code: file.code });
@@ -1163,8 +1165,10 @@ function verifyCaptcha(id, answer) {
   cleanupTransientChallenges();
   const challenge = captchaStore.get(String(id || ''));
   if (!challenge) return false;
+  const answerTrimmed = String(answer || '').trim();
+  if (!answerTrimmed) return false;
   challenge.attempts += 1;
-  const ok = String(answer || '').trim() && timingSafeEqualText(hashToken(String(answer || '').trim().toLowerCase()), challenge.answerHash);
+  const ok = timingSafeEqualText(hashToken(answerTrimmed.toLowerCase()), challenge.answerHash);
   if (ok || challenge.attempts >= 5) captchaStore.delete(String(id || ''));
   return Boolean(ok);
 }
@@ -1257,6 +1261,17 @@ async function cleanupExpired() {
   // Enforce per-category max limits
   for (const category of ['system', 'security', 'user']) {
     trimLogCategory(category);
+  }
+
+  // 清理过期的暴力破解和验证码失败记录
+  const now = Date.now();
+  for (const [ip, record] of bruteForceStore) {
+    if (record.blockedUntil && now > record.blockedUntil) bruteForceStore.delete(ip);
+    else if (!record.blockedUntil && now - record.firstAt > 5 * 60 * 1000) bruteForceStore.delete(ip);
+  }
+  for (const [ip, record] of publicCodeFailureStore) {
+    if (record.blockedUntil && now > record.blockedUntil) publicCodeFailureStore.delete(ip);
+    else if (!record.blockedUntil && now - record.firstAt > 10 * 60 * 1000) publicCodeFailureStore.delete(ip);
   }
 
   if (toRemove.length) addLog('files.cleanup_expired', null, { removed: toRemove.length });
@@ -1580,7 +1595,14 @@ app.post('/api/login', authLimiter, asyncRoute(async (req, res) => {
   const password = String(req.body.password || '');
   if (!verifyCaptcha(req.body.captchaId, req.body.captchaAnswer)) return res.status(400).json({ error: '验证码错误或已过期' });
   const user = state.users.find((item) => item.username === username);
-  if (!user || user.disabled || !(await verifyPassword(password, user.passwordHash))) {
+  if (!user || user.disabled) {
+    await hashPassword(password); // dummy 计算，防止时序攻击枚举用户名
+    recordLoginFailure(ip);
+    addLog('auth.login_failed', req, { username }, 'warn');
+    await saveState();
+    return res.status(401).json({ error: '用户名或密码错误' });
+  }
+  if (!(await verifyPassword(password, user.passwordHash))) {
     recordLoginFailure(ip);
     addLog('auth.login_failed', req, { username }, 'warn');
     await saveState();
@@ -1684,9 +1706,9 @@ app.post('/api/register', authLimiter, asyncRoute(async (req, res) => {
   if (!validatePassword(password)) return res.status(400).json({ error: '密码长度需为 8-128 位' });
   if (!validateEmail(email)) return res.status(400).json({ error: '邮箱格式不正确' });
   if (!email) return res.status(400).json({ error: '注册需要填写邮箱' });
+  if (!verifyCaptcha(req.body.captchaId, req.body.captchaAnswer)) return res.status(400).json({ error: '验证码错误或已过期' });
   if (state.users.some((item) => item.username === username)) return res.status(409).json({ error: '用户名已存在' });
   if (state.users.some((item) => item.email === email)) return res.status(409).json({ error: '该邮箱已被注册' });
-  if (!verifyCaptcha(req.body.captchaId, req.body.captchaAnswer)) return res.status(400).json({ error: '验证码错误或已过期' });
   const challenge = createEmailChallenge({ id: '_register_' });
   // scrypt 哈希和 SMTP 发送并行，节省 ~2-5 秒
   const [passwordHash, mailResult] = await Promise.all([
@@ -1914,7 +1936,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (r
   }
   addLog('admin.user_updated', req, { username: user.username, role: user.role, disabled: user.disabled, emailChanged: req.body.email !== undefined, passwordChanged: req.body.password !== undefined });
   await saveState();
-  res.json({ user: publicUser(user) });
+  res.json({ user: publicUser(user), csrfToken: req.session?.csrfToken });
 }));
 
 app.delete('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (req, res) => {
@@ -2275,7 +2297,7 @@ app.get('/api/files', requireAuth, asyncRoute(async (req, res) => {
       size: file.size,
       createdAt: file.createdAt,
       expiresAt: file.expiresAt,
-      retentionHours: file.retentionHours || getRetentionHours(),
+      retentionHours: file.retentionHours ?? getRetentionHours(),
       downloadCount: downloadCountFor(file),
       maxDownloads: normalizeMaxDownloads(file.maxDownloads),
       remainingDownloads: downloadsRemaining(file),
@@ -2319,7 +2341,7 @@ app.get('/api/admin/users/:userId/files', requireAuth, requireSuperAdmin, asyncR
       size: file.size,
       createdAt: file.createdAt,
       expiresAt: file.expiresAt,
-      retentionHours: file.retentionHours || getRetentionHours(),
+      retentionHours: file.retentionHours ?? getRetentionHours(),
       downloadCount: downloadCountFor(file),
       maxDownloads: normalizeMaxDownloads(file.maxDownloads),
       remainingDownloads: downloadsRemaining(file),
@@ -2341,7 +2363,7 @@ app.get('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
       size: file.size,
       createdAt: file.createdAt,
       expiresAt: file.expiresAt,
-      retentionHours: file.retentionHours || getRetentionHours(),
+      retentionHours: file.retentionHours ?? getRetentionHours(),
       downloadCount: downloadCountFor(file),
       maxDownloads: normalizeMaxDownloads(file.maxDownloads),
       remainingDownloads: downloadsRemaining(file),
@@ -2365,7 +2387,7 @@ app.patch('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   }
   addLog('files.updated', req, {
     fileId: file.id,
-    retentionHours: file.retentionHours || getRetentionHours(),
+    retentionHours: file.retentionHours ?? getRetentionHours(),
     maxDownloads: normalizeMaxDownloads(file.maxDownloads)
   });
   await saveState();

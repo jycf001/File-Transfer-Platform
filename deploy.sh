@@ -45,7 +45,11 @@ if [ ! -f .env ]; then
     # 自动生成 SESSION_SECRET
     if command -v openssl &>/dev/null; then
       SECRET=$(openssl rand -hex 32)
-      sed -i "s/^SESSION_SECRET=.*/SESSION_SECRET=${SECRET}/" .env
+      if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/^SESSION_SECRET=.*/SESSION_SECRET=${SECRET}/" .env
+      else
+        sed -i "s/^SESSION_SECRET=.*/SESSION_SECRET=${SECRET}/" .env
+      fi
       info "已自动生成 SESSION_SECRET"
     else
       warn "未找到 openssl，请手动编辑 .env 设置 SESSION_SECRET"
@@ -149,8 +153,8 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 30s;
     }
 }
 

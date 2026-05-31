@@ -65,7 +65,7 @@ window.JiahaoDrop = (() => {
     const svg = doc.querySelector('svg');
     if (!svg) return '';
     // 移除危险元素
-    const dangerousTags = ['script', 'foreignobject', 'iframe', 'embed', 'object', 'a', 'use', 'set', 'animate', 'animatetransform', 'animatemotion', 'style'];
+    const dangerousTags = ['script', 'foreignobject', 'iframe', 'embed', 'object', 'a', 'use', 'set', 'animate', 'animatetransform', 'animatemotion', 'style', 'image'];
     for (const tag of dangerousTags) {
       for (const el of svg.querySelectorAll(tag)) el.remove();
     }
@@ -113,9 +113,9 @@ window.JiahaoDrop = (() => {
     ]);
     if (status) {
       state.initialized = status.initialized;
-      state.limits.maxFileSizeMb = status.maxFileSizeMb;
-      state.limits.maxFilesPerUpload = status.maxFilesPerUpload;
-      state.limits.retentionHours = status.retentionHours;
+      state.limits.maxFileSizeMb = status.maxFileSizeMb ?? state.limits.maxFileSizeMb;
+      state.limits.maxFilesPerUpload = status.maxFilesPerUpload ?? state.limits.maxFilesPerUpload;
+      state.limits.retentionHours = status.retentionHours ?? state.limits.retentionHours;
       state.publicBaseUrl = status.publicBaseUrl || window.location.origin;
       state.storageQuotaMb = status.storageQuotaMb || 0;
       state.storageUsedBytes = status.storageUsedBytes || 0;

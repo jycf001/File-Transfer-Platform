@@ -75,7 +75,7 @@
   }
 }
 
-:root[data-theme="dark"] {
+:root:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0b1220;
   --bg-2: #101c31;
@@ -110,7 +110,7 @@
   --dock-glow: rgba(59, 130, 246, 0.12);
 }
 
-:root[data-theme="light"] {
+:root:root[data-theme="light"] {
   color-scheme: light;
   --bg: #f3f7fb;
   --bg-2: #e9f0f8;
@@ -730,8 +730,8 @@ label {
 .theme-toggle .icon-sun { display: none; }
 .theme-toggle .icon-moon { display: block; }
 
-:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
-:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+:root:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) .theme-toggle .icon-sun { display: block; }

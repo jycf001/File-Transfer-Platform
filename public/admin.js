@@ -298,7 +298,7 @@ async function saveSettings() {
         logMaxUser: Number(form.get('logMaxUser'))
       })
     });
-    elements.settingsForm.smtpPassword.value = '';
+    if (elements.settingsForm.smtpPassword) elements.settingsForm.smtpPassword.value = '';
     toast('设置已保存');
     loadSettings();
     loadOverview();
@@ -307,8 +307,8 @@ async function saveSettings() {
   }
 }
 
+elements.saveSettingsBtn.type = 'button';
 elements.saveSettingsBtn.addEventListener('click', saveSettings);
-elements.settingsForm.addEventListener('submit', (event) => { event.preventDefault(); saveSettings(); });
 
 elements.resetSystemBtn.addEventListener('click', async () => {
   if (!confirm('确定要恢复出厂设置吗？\n\n此操作将清除：\n- 所有用户账号\n- 所有文件\n- 所有会话\n- 所有日志\n- 所有设置\n\n此操作不可撤销！')) return;
@@ -633,4 +633,4 @@ bootstrap().then((user) => {
   } else {
     window.location.replace('/login');
   }
-}).catch((error) => toast(error.message));
+}).catch(() => window.location.replace('/login'));

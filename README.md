@@ -2,32 +2,138 @@
 
 适合 2c2G 云服务器的小型私有文件快传服务。登录后上传文件生成接收码和分享链接，未登录用户可直接输入接收码或打开链接下载。
 
-## 功能
+## 功能特性
 
-- 普通用户登录后上传和接收文件
-- 管理员后台管理用户、系统设置、日志和邮件
-- 上传后生成接收码和分享链接，支持二维码扫描
-- 未登录用户可在首页输入接收码或打开分享链接直接下载
-- 文件默认 48 小时过期自动清理
-- 支持 SMTP 邮件通知、邮箱验证码登录
-- 审计日志记录登录、上传、下载、删除、用户管理和设置变更
+- 登录后上传文件，生成 6 位接收码和分享链接
+- 未登录用户在首页输入接收码或打开分享链接直接下载
+- 文件默认 48 小时过期自动清理，支持自定义保留时长（1-720 小时或永久保留）
+- 支持设置下载次数限制，达到上限后自动拒绝
+- 多文件上传自动打包为 ZIP
+- 管理后台：用户管理、系统设置、审计日志、SMTP 邮件
 - 三级角色体系：超级管理员 / 管理员 / 普通用户
+- 支持 SMTP 邮箱验证码登录和用户注册
+- 响应式 UI，支持暗色/亮色主题切换
 
-## 页面地址
+## 页面路由
 
-| 页面 | 路径 |
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| 首页 | `/` | 公开取件码输入 + 登录入口 |
+| 发送 | `/app/send` | 登录后上传文件 |
+| 接收 | `/app/receive` | 登录后输入接收码下载 |
+| 我的文件 | `/app/files` | 文件管理（设置有效期、下载次数、删除） |
+| 账号 | `/app/account` | 邮箱绑定 |
+| 管理后台 | `/admin` | 系统管理（仅管理员） |
+| 公开接收 | `/r/:code` | 分享链接落地页，无需登录 |
+
+---
+
+## 技术架构
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    Nginx 反向代理                      │
+│            HTTPS · gzip · client_max_body_size        │
+└──────────────────────┬───────────────────────────────┘
+                       │ http://127.0.0.1:3000
+┌──────────────────────▼───────────────────────────────┐
+│                  Node.js (Express)                    │
+│                                                      │
+│  中间件栈:                                            │
+│  helmet → compression → json → originGuard           │
+│  → attachSession → csrfGuard → rateLimit → routes    │
+│                                                      │
+│  定时任务: 每 15 分钟清理过期文件/会话/日志             │
+└──────────────────────┬───────────────────────────────┘
+                       │
+┌──────────────────────▼───────────────────────────────┐
+│               文件系统 (零数据库)                      │
+│                                                      │
+│  data/                                               │
+│  ├── state.json      用户·文件·会话·日志·设置          │
+│  ├── .session-secret 会话签名密钥                     │
+│  ├── storage/        上传文件实体 (随机化文件名)       │
+│  └── tmp/            multer 临时文件                  │
+└──────────────────────────────────────────────────────┘
+```
+
+### 后端
+
+单文件 `server.js`，零框架依赖，仅 7 个 npm 包：
+
+| 包 | 用途 |
+|---|---|
+| express | Web 框架 |
+| multer | 文件上传 |
+| helmet | 安全 HTTP 头 |
+| compression | gzip 压缩 |
+| express-rate-limit | 接口限流 |
+| nodemailer | SMTP 邮件 |
+| archiver | 多文件打包 ZIP |
+
+### 前端
+
+纯原生 HTML/CSS/JS，无构建步骤，无前端框架：
+
+| 文件 | 说明 |
+|---|---|
+| `index.html` + `home.js` | 首页（取件码输入） |
+| `login.html` + `login.js` | 登录/注册 |
+| `app.html` + `app.js` | 主应用（上传、文件管理） |
+| `receive.html` + `receive.js` | 公开接收页 |
+| `admin.html` + `admin.js` | 管理后台 |
+| `shared.js` | 共享工具（API、toast、格式化） |
+| `theme.js` | 主题切换持久化 |
+| `styles.css` | 全局样式（明/暗双主题） |
+
+### 数据存储
+
+所有状态存储在单个 `state.json` 中，采用原子写入（先写 `.tmp` 再 `rename`），防止写入中断导致数据损坏。
+
+---
+
+## 安全设计
+
+| 层级 | 措施 |
 |------|------|
-| 首页（登录/公开接收） | `http://服务器IP:3000` |
-| 登录后使用页 | `http://服务器IP:3000/app/send` |
-| 管理后台 | `http://服务器IP:3000/admin` |
-| 分享链接示例 | `https://你的域名/r/ABC123` |
+| 传输 | HTTPS、HSTS、`X-Content-Type-Options: nosniff` |
+| CSRF | Origin/Referer 校验 + `X-CSRF-Token` 请求头 |
+| CSP | `default-src 'self'`、`object-src 'none'`、`frame-ancestors 'none'` |
+| 认证 | scrypt 密码哈希、HttpOnly + SameSite=Strict Cookie |
+| 限流 | 登录 20次/15分钟、API 180次/分钟、公开下载 20次/分钟 |
+| 暴力破解 | 5 次失败锁定（递增 1/5/15 分钟）、时序攻击防护 |
+| 验证码 | 自绘 SVG、HMAC-SHA256 哈希、5 分钟过期 |
+| 文件 | 禁止可执行文件上传、路径遍历防护、文件名消毒 |
+| 存储 | SMTP 密码 AES-256-GCM 加密、目录权限 0o700 |
+| 下载 | 原子 check-and-increment 防 TOCTOU 竞态 |
+
+---
+
+## 项目结构
+
+```
+├── server.js              后端主文件
+├── package.json
+├── .env.example           环境变量模板
+├── nginx/
+│   └── baota.conf.example 宝塔 Nginx 配置模板
+├── public/                前端静态文件
+│   ├── *.html             页面
+│   ├── styles.css         样式
+│   ├── *.js               脚本
+│   └── favicon.svg        图标
+└── data/                  运行时数据 (gitignore)
+    ├── state.json
+    ├── storage/
+    └── tmp/
+```
 
 ---
 
 ## 环境要求
 
-| 项目 | 最低要求 |
-|------|---------|
+| 项目 | 要求 |
+|------|------|
 | Node.js | >= 20.x（推荐 LTS） |
 | 操作系统 | Linux / Windows / macOS |
 | 内存 | >= 512MB（推荐 2GB+） |
@@ -35,397 +141,76 @@
 
 ---
 
-## 快速开始（本地体验）
-
-### 1. 安装 Node.js
-
-前往 https://nodejs.org 下载安装 **Node.js 20 LTS** 或更高版本。
-
-安装完成后验证：
-
-```bash
-node -v   # 应输出 v20.x.x 或更高
-npm -v
-```
-
-### 2. 下载项目
+## 快速开始
 
 ```bash
 git clone https://github.com/jycf001/File-Transfer-Platform.git
 cd File-Transfer-Platform
-```
-
-### 3. 安装依赖
-
-```bash
 npm install
-```
-
-这会根据 `package.json` 自动安装以下依赖：
-
-| 包名 | 作用 |
-|------|------|
-| `express` | Web 框架，处理 HTTP 请求和路由 |
-| `multer` | 处理文件上传（multipart/form-data） |
-| `helmet` | 设置安全 HTTP 头（CSP、XSS 防护等） |
-| `compression` | gzip 压缩响应，减少传输体积 |
-| `express-rate-limit` | 接口限流，防止暴力破解和滥用 |
-| `nodemailer` | 发送邮件（验证码、日志推送） |
-| `archiver` | 打包多文件为 zip 供下载 |
-
-安装完成后会生成 `node_modules/` 目录和 `package-lock.json` 文件。
-
-### 4. 启动服务
-
-```bash
 npm start
 ```
 
-看到类似输出即启动成功：
+浏览器打开 `http://localhost:3000`，首次访问会进入初始化页面创建管理员。
 
-```
-[JiahaoDrop] listening on 0.0.0.0:3000
+### Linux 一键部署
+
+项目内置 `deploy.sh` 脚本，自动完成依赖安装、环境配置、systemd 服务创建：
+
+```bash
+git clone https://github.com/jycf001/File-Transfer-Platform.git jiahaodrop
+cd jiahaodrop
+bash deploy.sh
 ```
 
-浏览器打开 `http://localhost:3000` 即可访问。
+脚本会自动检测 Node.js 版本、从 `.env.example` 生成 `.env` 并创建 `SESSION_SECRET`、生成 systemd 服务文件。执行完成后按提示编辑 `.env` 并启动：
+
+```bash
+nano .env                          # 设置域名、文件大小等
+systemctl start jiahaodrop         # 启动服务
+systemctl status jiahaodrop        # 查看状态
+journalctl -u jiahaodrop -f        # 查看日志
+```
+
+> 详细部署文档见 [deploy.md](./deploy.md)，包含宝塔面板、Linux、Windows、macOS 的完整部署指南。
+
+浏览器打开 `http://localhost:3000`，首次访问会进入初始化页面创建管理员。
 
 ---
 
-## 首次部署：创建管理员
+## 环境变量
 
-服务首次启动时没有任何用户，需要创建管理员账号。有三种方式：
+在项目根目录创建 `.env` 文件（参考 `.env.example`）：
 
-### 方式一：Web 页面初始化（推荐）
-
-1. 在项目根目录创建 `.env` 文件，添加初始化令牌：
-
-```bash
-INIT_TOKEN=你的初始化令牌（随意填写一个复杂字符串）
-```
-
-2. 启动服务：`npm start`
-3. 浏览器打开 `http://服务器IP:3000`，会显示初始化页面
-4. 输入你设置的 `INIT_TOKEN`，填写用户名、密码、邮箱，点击创建
-
-> 设置 `INIT_TOKEN` 可防止公网暴露时被他人抢先创建管理员。
-
-### 方式二：命令行初始化
-
-```bash
-node server.js --init
-```
-
-按提示输入用户名、密码、邮箱即可。无需公网访问。
-
-### 方式三：环境变量自动初始化
-
-在 `.env` 中设置以下变量，服务首次启动时会自动创建管理员：
-
-```bash
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=你的强密码至少8位
-ADMIN_EMAIL=admin@example.com
-```
-
-> 适合自动化部署。建议创建成功后删除这三个环境变量。
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | 3000 | 监听端口 |
+| `HOST` | 0.0.0.0 | 监听地址 |
+| `PUBLIC_BASE_URL` | 空 | 公网域名（分享链接用） |
+| `SESSION_SECRET` | 自动生成 | 会话密钥（生产环境必须设置） |
+| `SESSION_HOURS` | 12 | 会话绝对有效期 |
+| `SESSION_IDLE_MINUTES` | 30 | 会话空闲超时 |
+| `MAX_FILE_SIZE_MB` | 512 | 单文件大小上限 (MB) |
+| `MAX_FILES_PER_UPLOAD` | 10 | 单次最大上传文件数 |
+| `RETENTION_HOURS` | 48 | 文件默认保留时长 |
+| `STORAGE_QUOTA_MB` | 0 | 总存储限制 (MB)，0 不限 |
+| `COOKIE_SECURE` | false | HTTPS 时设为 true |
+| `TRUST_PROXY` | false | 反向代理时设为 true |
 
 ---
 
-## 环境变量配置
+## 数据备份
 
-在项目根目录创建 `.env` 文件（可参考 `.env.example`）：
-
-```bash
-# 服务监听
-PORT=3000
-HOST=0.0.0.0
-
-# 数据目录
-DATA_DIR=./data
-STORAGE_DIR=./data/storage
-
-# 公网访问域名（分享链接使用）
-PUBLIC_BASE_URL=https://send.example.com
-
-# 会话密钥（生产环境必须设置，至少 32 位随机字符串）
-SESSION_SECRET=
-
-# 会话有效期
-SESSION_HOURS=12
-SESSION_IDLE_MINUTES=30
-
-# 文件限制
-MAX_FILE_SIZE_MB=512
-MAX_FILES_PER_UPLOAD=10
-
-# 文件保留时间（小时）
-RETENTION_HOURS=48
-
-# 总存储空间限制（MB），0 表示不限制
-STORAGE_QUOTA_MB=0
-
-# 安全选项（HTTPS 反代后启用）
-COOKIE_SECURE=false
-TRUST_PROXY=false
-
-# 管理员初始化（首次启动使用，创建后可删除）
-ADMIN_USERNAME=
-ADMIN_PASSWORD=
-ADMIN_EMAIL=
-INIT_TOKEN=
-```
-
-生成随机密钥：
-
-```bash
-openssl rand -hex 32
-```
-
----
-
-## 生产部署
-
-### 方式一：宝塔面板
-
-1. 宝塔安装 **Node.js 版本管理器**，选择 Node.js 20.x
-2. 上传项目到 `/www/wwwroot/jiahaodrop/`
-3. 终端执行 `cd /www/wwwroot/jiahaodrop && npm install --production`
-4. 创建 `.env` 配置文件，设置 `COOKIE_SECURE=true` 和 `TRUST_PROXY=true`
-5. 宝塔 → **网站** → **Node项目** → **添加Node项目**，项目目录选 `/www/wwwroot/jiahaodrop`，启动文件填 `server.js`，端口填 `3000`
-6. 宝塔 → **网站** → 找到你绑定域名的站点 → 点击**设置** → **反向代理** → **添加反向代理**：
-
-| 配置项 | 填写内容 |
-|-------|---------|
-| 代理名称 | `jiahaodrop` |
-| 目标URL | `http://127.0.0.1:3000` |
-| 发送域名 | `$host` |
-
-7. 提交后宝塔会自动生成 Nginx 配置，域名流量将转发到 Node 项目
-8. 在站点设置中申请 SSL 证书，开启强制 HTTPS
-9. 重启 Node 项目使 `.env` 生效
-
-> **注意**：反向代理是在**网站站点**中配置，不是在 Node 项目中配置。两者是独立的，需要通过反向代理把域名和 Node 项目关联起来。
-
-> **如果域名访问不生效**：宝塔自动生成的 Nginx 配置可能有问题（见下方说明）。可参考 `nginx/baota.conf.example` 手动替换站点配置。
-
-#### 宝塔自动生成配置的常见问题
-
-宝塔生成的 Nginx 配置可能存在以下问题，导致域名无法正常访问：
-
-| 问题 | 说明 | 后果 |
-|------|------|------|
-| `listen 3000;` | Nginx 和 Node 项目同时监听 3000 端口 | 端口冲突，反向代理死循环 |
-| 缺少 `X-Forwarded-Proto` | 应用无法识别客户端是否使用 HTTPS | Cookie 会话异常，HTTPS 下无法登录 |
-| `Host` 头带端口 | `proxy_set_header Host $host:$server_port` | 应用生成的链接可能带多余端口号 |
-
-**解决方式**：在站点设置 → 反向代理中删除自动生成的配置，参考项目中 `nginx/baota.conf.example` 手动填写 Nginx 配置文件。配置文件路径：
-
-```
-/www/server/panel/vhost/nginx/你的站点名.conf
-```
-
-替换后执行：
-
-```bash
-nginx -t && systemctl reload nginx
-```
-
-### 方式二：Linux 手动部署
-
-```bash
-# 1. 安装 Node.js
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
-sudo apt install -y nodejs
-
-# 2. 上传项目并安装依赖
-cd /www/wwwroot/jiahaodrop
-npm install --production
-
-# 3. 创建 .env 并配置
-cp .env.example .env
-nano .env   # 编辑配置
-
-# 4. 创建 systemd 服务
-sudo tee /etc/systemd/system/jiahaodrop.service << 'EOF'
-[Unit]
-Description=JiahaoDrop File Transfer
-After=network.target
-
-[Service]
-Type=simple
-User=www
-WorkingDirectory=/www/wwwroot/jiahaodrop
-ExecStart=/usr/bin/node server.js
-Restart=on-failure
-RestartSec=5
-Environment=NODE_ENV=production
-EnvironmentFile=-/www/wwwroot/jiahaodrop/.env
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# 5. 启动并设置开机自启
-sudo systemctl daemon-reload
-sudo systemctl enable jiahaodrop
-sudo systemctl start jiahaodrop
-
-# 6. 查看状态和日志
-sudo systemctl status jiahaodrop
-sudo journalctl -u jiahaodrop -f
-```
-
-### Nginx 反向代理
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name send.example.com;
-
-    ssl_certificate     /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-    client_max_body_size 8g;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
-}
-
-server {
-    listen 80;
-    server_name send.example.com;
-    return 301 https://$host$request_uri;
-}
-```
-
-重载 Nginx：
-
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-> 更多部署细节见 [DEPLOY.md](./DEPLOY.md)
-
----
-
-## 数据备份与迁移
-
-所有运行时数据都在 `data/` 目录下：
+所有运行时数据在 `data/` 目录下：
 
 ```
 data/
-├── state.json          ← 用户、文件记录、设置、日志
-├── .session-secret     ← 会话密钥
-├── storage/            ← 上传的文件实体
-└── tmp/                ← 临时文件（可忽略）
+├── state.json          用户、文件记录、设置、日志
+├── .session-secret     会话密钥
+├── storage/            上传的文件实体
+└── tmp/                临时文件（可忽略）
 ```
 
-备份或迁移时，复制整个 `data/` 目录到新服务器即可保留所有账户和文件：
-
-```bash
-rsync -avz /旧路径/data/ 新服务器:/新路径/data/
-```
-
-> `.env` 需要在新服务器重新配置（域名/IP 不同）。`node_modules/` 不需要复制，在新服务器执行 `npm install` 即可。
-
----
-
-## 常见问题
-
-### 服务启动后打不开
-
-1. 检查防火墙是否放行端口（默认 3000）
-2. 云服务器需在安全组中放行端口
-3. 检查服务是否正常：`curl http://127.0.0.1:3000/api/health`
-
-### 域名访问显示其他页面或 502
-
-1. 确认宝塔**网站**列表中有绑定该域名的站点
-2. 进入该站点 → 设置 → 反向代理，确认已添加且目标为 `http://127.0.0.1:3000`
-3. 确认 Node 项目正在运行（宝塔 Node 项目列表显示「运行中」）
-4. 确认 `.env` 中 `PORT` 与反向代理目标端口一致（默认 3000）
-5. 如果 Nginx 配置被覆盖，尝试删除反向代理后重新添加
-
-### 上传文件失败
-
-1. 检查 Nginx 的 `client_max_body_size` 是否足够
-2. 检查 `.env` 中的 `MAX_FILE_SIZE_MB`
-3. 检查磁盘空间是否充足
-
-### 上传大文件失败 / 如何调整上传大小限制
-
-上传大文件时如果提示「文件超过服务器大小限制」或「请求失败」，通常是因为 Nginx 的 `client_max_body_size` 限制了请求体大小。Nginx 默认只允许 1MB，必须手动调整。
-
-#### 修改步骤
-
-**1. 修改 Nginx 配置**
-
-在 Nginx 配置中找到或添加 `client_max_body_size`，设置为你需要的值：
-
-```nginx
-# 例如允许上传 8GB 文件
-client_max_body_size 8g;
-```
-
-配置文件位置：
-- 宝塔面板：`/www/server/panel/vhost/nginx/你的站点名.conf`
-- 手动部署：`/etc/nginx/sites-enabled/你的配置` 或 `/etc/nginx/nginx.conf`
-
-**2. 同步修改应用配置**
-
-在管理后台 → 设置 中修改「单文件大小限制」，或在 `.env` 中设置 `MAX_FILE_SIZE_MB`：
-
-```bash
-MAX_FILE_SIZE_MB=8192
-```
-
-> 应用支持的最大值为 10240 MB（10GB）。Nginx 的 `client_max_body_size` 应大于等于应用中的设置，否则 Nginx 会先于应用拦截请求。
-
-**3. 重载 Nginx**
-
-```bash
-nginx -t && systemctl reload nginx
-```
-
-**4. 重启 Node 项目**
-
-使 `.env` 中的新配置生效。
-
-#### 调大上传限制的风险
-
-| 风险 | 说明 |
-|------|------|
-| **磁盘空间耗尽** | 大文件直接占满磁盘，导致服务崩溃、数据库无法写入。建议配合 `STORAGE_QUOTA_MB` 设置总存储上限 |
-| **内存占用过高** | 上传过程中临时文件存放在磁盘而非内存，但并发多个大文件上传仍会消耗系统资源 |
-| **超时中断** | 慢速网络上传大文件耗时长，Nginx 的 `proxy_read_timeout`（默认 300s）可能不够。建议大文件场景设为 `86400s`（24 小时） |
-| **恶意滥用** | 允许上传超大文件可能被恶意用户利用来占满磁盘。建议仅对可信用户开放，或设置合理的存储配额和文件保留时间 |
-| **备份成本增加** | 大文件越多，备份 `data/` 目录所需的时间和存储空间越大 |
-
-#### 建议配置参考
-
-| 场景 | `client_max_body_size` | 管理后台「单文件大小限制」 | `proxy_read_timeout` | 其他建议 |
-|------|----------------------|-------------------------|---------------------|---------|
-| 小文件 | `512m` | `512` | `300s` | 无需额外配置 |
-| 中等文件 | `2g` | `2048` | `3600s` | 设置存储配额 |
-| 大文件（默认） | `8g` | `8192` | `86400s` | 建议设置存储配额 |
-
-### 忘记管理员密码
-
-- 有其他管理员：登录后台直接重置密码
-- 无可用管理员：停止服务，备份 `data/state.json`，删除后重新初始化
-
-### SMTP 邮件发送失败
-
-1. 后台 → 设置 → SMTP 配置中填写正确的邮件服务器信息
-2. 点击「发送测试邮件」验证
-3. 检查服务器防火墙是否放行 SMTP 端口（465/587）
+备份整个 `data/` 目录即可。迁移时在新服务器执行 `npm install` 后将 `data/` 复制过去。
 
 ---
 
