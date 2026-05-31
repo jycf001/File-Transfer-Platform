@@ -30,6 +30,11 @@ const elements = {
   maxDownloadsInput: $('#maxDownloadsInput'),
   uploadResults: $('#uploadResults'),
   toggleUploadResultsBtn: $('#toggleUploadResultsBtn'),
+  uploadProgress: $('#uploadProgress'),
+  progressFill: $('#progressFill'),
+  progressPercent: $('#progressPercent'),
+  progressSpeed: $('#progressSpeed'),
+  progressSize: $('#progressSize'),
   uploadLimit: $('#uploadLimit'),
   codeForm: $('#codeForm'),
   codeInput: $('#codeInput'),
@@ -251,9 +256,42 @@ elements.uploadBtn.addEventListener('click', async () => {
   formData.append('maxDownloads', String(maxDownloadsValue()));
   elements.uploadBtn.disabled = true;
   elements.uploadBtn.textContent = '上传中...';
+  elements.uploadProgress.hidden = false;
+  elements.progressFill.style.width = '0%';
+  elements.progressPercent.textContent = '0%';
+  elements.progressSpeed.textContent = '计算中...';
+  elements.progressSize.textContent = `0 / ${formatSize(state.selectedFiles.reduce((s, f) => s + f.size, 0))}`;
   try {
-    await api('/api/files', { method: 'POST', body: formData });
-    state.storageUsedBytes += state.selectedFiles.reduce((sum, file) => sum + file.size, 0);
+    const totalSize = state.selectedFiles.reduce((s, f) => s + f.size, 0);
+    const startTime = Date.now();
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/files');
+      if (state.csrfToken) xhr.setRequestHeader('X-CSRF-Token', state.csrfToken);
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        const percent = Math.round((e.loaded / e.total) * 100);
+        const elapsed = (Date.now() - startTime) / 1000;
+        const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+        elements.progressFill.style.width = `${percent}%`;
+        elements.progressPercent.textContent = `${percent}%`;
+        elements.progressSpeed.textContent = speed > 0 ? `${formatSize(speed)}/s` : '计算中...';
+        elements.progressSize.textContent = `${formatSize(e.loaded)} / ${formatSize(e.total)}`;
+      };
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+          else reject(new Error(data?.error || '请求失败'));
+        } catch {
+          if (xhr.status === 413) reject(new Error('文件超过服务器大小限制'));
+          else reject(new Error('请求失败'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.send(formData);
+    });
+    state.storageUsedBytes += totalSize;
     state.selectedFiles = [];
     elements.fileInput.value = '';
     renderSelectedFiles();
@@ -264,6 +302,7 @@ elements.uploadBtn.addEventListener('click', async () => {
   } finally {
     elements.uploadBtn.disabled = state.selectedFiles.length === 0;
     elements.uploadBtn.textContent = '开始上传';
+    elements.uploadProgress.hidden = true;
   }
 });
 

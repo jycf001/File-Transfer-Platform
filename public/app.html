@@ -66,6 +66,16 @@
             </label>
           </div>
           <button class="primary wide" id="uploadBtn" type="button" disabled hidden>开始上传</button>
+          <div class="upload-progress" id="uploadProgress" hidden>
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-info">
+              <span id="progressPercent">0%</span>
+              <span id="progressSpeed">计算中...</span>
+              <span id="progressSize">0 / 0 MB</span>
+            </div>
+          </div>
           <p class="upload-legal-tip" data-brand="legal">请勿传输违法违规内容，所有操作均记录审计日志。</p>
           <div class="upload-results-toolbar">
             <h3>最近上传</h3>

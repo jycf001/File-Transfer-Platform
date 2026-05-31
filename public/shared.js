@@ -177,6 +177,7 @@ window.JiahaoDrop = (() => {
       const saved = localStorage.getItem('theme');
       if (saved === 'dark' || saved === 'light') {
         document.documentElement.dataset.theme = saved;
+        document.documentElement.style.colorScheme = saved;
       }
     } catch {}
   }
@@ -187,6 +188,7 @@ window.JiahaoDrop = (() => {
     const isDark = current === 'dark' || (!current && prefersDark);
     const next = isDark ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
+    document.documentElement.style.colorScheme = next;
     try {
       localStorage.setItem('theme', next);
     } catch {}
