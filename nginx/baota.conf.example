@@ -1,0 +1,72 @@
+# JiahaoDrop 宝塔面板 Nginx 参考配置
+#
+# 使用方式：
+#   1. 在宝塔中创建网站站点，绑定域名
+#   2. 在站点设置 → 反向代理 → 添加反向代理（宝塔会自动生成配置）
+#   3. 如果自动生成的配置不生效，可将本文件内容替换到站点的 Nginx 配置中
+#      配置文件路径：/www/server/panel/vhost/nginx/你的站点名.conf
+#   4. 替换后执行：nginx -t && systemctl reload nginx
+#
+# 常见问题：
+#   - 宝塔自动生成的配置可能包含 listen 3000，这会和 Node 项目端口冲突，必须删除
+#   - 宝塔可能缺少 X-Forwarded-Proto 头，导致应用无法识别 HTTPS，会话异常
+#   - 详细说明见 README.md 和 DEPLOY.md
+
+# HTTPS + HTTP 跳转（推荐）
+server
+{
+    listen 443 ssl;
+    http2 on;
+    server_name send.example.com;   # ← 改成你的域名
+
+    # SSL 证书路径（宝塔自动申请的证书路径格式）
+    ssl_certificate    /www/server/panel/vhost/cert/你的站点名/fullchain.pem;
+    ssl_certificate_key    /www/server/panel/vhost/cert/你的站点名/privkey.pem;
+    ssl_protocols TLSv1.1 TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:EECDH+3DES:RSA+3DES:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_tickets on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    add_header Strict-Transport-Security "max-age=31536000";
+
+    # 上传大小限制（与 .env 中 MAX_FILE_SIZE_MB 保持一致）
+    client_max_body_size 512m;
+
+    # 禁止访问敏感文件
+    location ~* (\.env.*|\.git|\.gitignore|package(-lock)?\.json|node_modules)
+    {
+        return 404;
+    }
+
+    # SSL 证书验证目录（宝塔自动申请证书需要）
+    location /.well-known/ {
+        root  /www/wwwroot/jiahaodrop;
+    }
+
+    # 反向代理到 Node 项目
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 30s;
+    }
+
+    access_log  /www/wwwlogs/jiahaodrop.log;
+    error_log   /www/wwwlogs/jiahaodrop.error.log;
+}
+
+# HTTP 自动跳转 HTTPS
+server
+{
+    listen 80;
+    server_name send.example.com;   # ← 改成你的域名
+    return 301 https://$host$request_uri;
+}

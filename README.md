@@ -190,7 +190,7 @@ openssl rand -hex 32
 1. 宝塔安装 **Node.js 版本管理器**，选择 Node.js 20.x
 2. 上传项目到 `/www/wwwroot/jiahaodrop/`
 3. 终端执行 `cd /www/wwwroot/jiahaodrop && npm install --production`
-4. 创建 `.env` 配置文件
+4. 创建 `.env` 配置文件，设置 `COOKIE_SECURE=true` 和 `TRUST_PROXY=true`
 5. 宝塔 → **网站** → **Node项目** → **添加Node项目**，项目目录选 `/www/wwwroot/jiahaodrop`，启动文件填 `server.js`，端口填 `3000`
 6. 宝塔 → **网站** → 找到你绑定域名的站点 → 点击**设置** → **反向代理** → **添加反向代理**：
 
@@ -202,9 +202,33 @@ openssl rand -hex 32
 
 7. 提交后宝塔会自动生成 Nginx 配置，域名流量将转发到 Node 项目
 8. 在站点设置中申请 SSL 证书，开启强制 HTTPS
-9. `.env` 中设置 `COOKIE_SECURE=true` 和 `TRUST_PROXY=true`，重启 Node 项目
+9. 重启 Node 项目使 `.env` 生效
 
 > **注意**：反向代理是在**网站站点**中配置，不是在 Node 项目中配置。两者是独立的，需要通过反向代理把域名和 Node 项目关联起来。
+
+> **如果域名访问不生效**：宝塔自动生成的 Nginx 配置可能有问题（见下方说明）。可参考 `nginx/baota.conf.example` 手动替换站点配置。
+
+#### 宝塔自动生成配置的常见问题
+
+宝塔生成的 Nginx 配置可能存在以下问题，导致域名无法正常访问：
+
+| 问题 | 说明 | 后果 |
+|------|------|------|
+| `listen 3000;` | Nginx 和 Node 项目同时监听 3000 端口 | 端口冲突，反向代理死循环 |
+| 缺少 `X-Forwarded-Proto` | 应用无法识别客户端是否使用 HTTPS | Cookie 会话异常，HTTPS 下无法登录 |
+| `Host` 头带端口 | `proxy_set_header Host $host:$server_port` | 应用生成的链接可能带多余端口号 |
+
+**解决方式**：在站点设置 → 反向代理中删除自动生成的配置，参考项目中 `nginx/baota.conf.example` 手动填写 Nginx 配置文件。配置文件路径：
+
+```
+/www/server/panel/vhost/nginx/你的站点名.conf
+```
+
+替换后执行：
+
+```bash
+nginx -t && systemctl reload nginx
+```
 
 ### 方式二：Linux 手动部署
 

@@ -118,7 +118,7 @@ openssl rand -hex 32
 
 ### 6. 配置反向代理
 
-在宝塔 **Node项目** 列表中找到 JiahaoDrop，点击右侧 **设置** → **反向代理** → **添加反向代理**：
+在宝塔 **网站** 列表中找到你绑定域名的站点，点击 **设置** → **反向代理** → **添加反向代理**：
 
 | 配置项 | 填写内容 |
 |-------|---------|
@@ -127,6 +127,30 @@ openssl rand -hex 32
 | 发送域名 | `$host` |
 
 提交后，宝塔会自动生成 Nginx 配置。
+
+> **注意**：反向代理是在**网站站点**中配置，不是在 Node 项目中配置。
+
+#### 宝塔自动生成配置的常见问题
+
+宝塔生成的 Nginx 配置可能存在以下问题，导致域名无法正常访问：
+
+| 问题 | 说明 | 后果 |
+|------|------|------|
+| `listen 3000;` | Nginx 和 Node 项目同时监听 3000 端口 | 端口冲突，反向代理死循环 |
+| 缺少 `X-Forwarded-Proto` | 应用无法识别客户端是否使用 HTTPS | Cookie 会话异常，HTTPS 下无法登录 |
+| `Host` 头带端口 | `proxy_set_header Host $host:$server_port` | 应用生成的链接可能带多余端口号 |
+
+**解决方式**：在站点设置 → 反向代理中删除自动生成的配置，参考项目中 `nginx/baota.conf.example` 手动替换站点的 Nginx 配置文件。配置文件路径：
+
+```
+/www/server/panel/vhost/nginx/你的站点名.conf
+```
+
+替换后执行：
+
+```bash
+nginx -t && systemctl reload nginx
+```
 
 ### 7. 配置 HTTPS
 
@@ -252,7 +276,9 @@ sudo journalctl -u jiahaodrop -f
 
 ### 宝塔用户
 
-宝塔会自动生成 Nginx 配置，你只需在站点设置中确认以下配置存在：
+宝塔会自动生成 Nginx 配置，但可能存在端口冲突和缺少 `X-Forwarded-Proto` 头的问题。建议参考 `nginx/baota.conf.example` 手动配置。
+
+关键配置项（必须包含）：
 
 ```nginx
 location / {
@@ -261,8 +287,13 @@ location / {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
 }
 ```
+
+> 完整配置见 `nginx/baota.conf.example`，包含 SSL、HTTP 跳转、敏感文件屏蔽等。
 
 ### 手动配置
 
@@ -403,6 +434,16 @@ ADMIN_EMAIL=admin@example.com
 1. 检查防火墙是否放行端口
 2. 检查云服务器安全组是否放行端口
 3. 检查服务是否正常运行：`curl http://127.0.0.1:3000/api/health`
+
+### 域名访问显示其他页面或 502
+
+1. 确认宝塔**网站**列表中有绑定该域名的站点
+2. 进入该站点 → 设置 → 反向代理，确认已添加且目标为 `http://127.0.0.1:3000`
+3. 确认 Node 项目正在运行（宝塔 Node 项目列表显示「运行中」）
+4. 确认 `.env` 中 `PORT` 与反向代理目标端口一致（默认 3000）
+5. 检查 Nginx 配置是否包含 `listen 3000;`（应该删除，会和 Node 端口冲突）
+6. 检查 Nginx 配置是否包含 `proxy_set_header X-Forwarded-Proto $scheme;`（必须有）
+7. 参考 `nginx/baota.conf.example` 手动替换站点 Nginx 配置
 
 ### 上传文件失败
 
