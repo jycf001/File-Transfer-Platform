@@ -140,7 +140,7 @@ server {
 
     ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
-    client_max_body_size 512m;
+    client_max_body_size 8g;
 
     location / {
         proxy_pass http://127.0.0.1:${APP_PORT};

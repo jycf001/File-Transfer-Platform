@@ -302,8 +302,8 @@ server {
     listen 80;
     server_name send.example.com;
 
-    # 上传大小限制（与 MAX_FILE_SIZE_MB 保持一致）
-    client_max_body_size 512m;
+    # 上传大小限制（与管理后台「单文件大小限制」保持一致）
+    client_max_body_size 8g;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -330,7 +330,7 @@ server {
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
 
-    client_max_body_size 512m;
+    client_max_body_size 8g;
 
     location / {
         proxy_pass http://127.0.0.1:3000;

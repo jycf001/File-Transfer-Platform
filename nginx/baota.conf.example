@@ -30,8 +30,8 @@ server
     ssl_session_timeout 10m;
     add_header Strict-Transport-Security "max-age=31536000";
 
-    # 上传大小限制（与 .env 中 MAX_FILE_SIZE_MB 保持一致）
-    client_max_body_size 512m;
+    # 上传大小限制（与管理后台「单文件大小限制」保持一致）
+    client_max_body_size 8g;
 
     # 禁止访问敏感文件
     location ~* (\.env.*|\.git|\.gitignore|package(-lock)?\.json|node_modules)

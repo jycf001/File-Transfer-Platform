@@ -284,7 +284,7 @@ server {
 
     ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
-    client_max_body_size 512m;
+    client_max_body_size 8g;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -370,8 +370,8 @@ rsync -avz /旧路径/data/ 新服务器:/新路径/data/
 在 Nginx 配置中找到或添加 `client_max_body_size`，设置为你需要的值：
 
 ```nginx
-# 例如允许上传 1GB 文件
-client_max_body_size 1024m;
+# 例如允许上传 8GB 文件
+client_max_body_size 8g;
 ```
 
 配置文件位置：
@@ -380,13 +380,13 @@ client_max_body_size 1024m;
 
 **2. 同步修改应用配置**
 
-在 `.env` 中将 `MAX_FILE_SIZE_MB` 设为相同或更小的值：
+在管理后台 → 设置 中修改「单文件大小限制」，或在 `.env` 中设置 `MAX_FILE_SIZE_MB`：
 
 ```bash
-MAX_FILE_SIZE_MB=1024
+MAX_FILE_SIZE_MB=8192
 ```
 
-也可以在管理后台 → 设置 中修改「单文件大小限制」。
+> 应用支持的最大值为 10240 MB（10GB）。Nginx 的 `client_max_body_size` 应大于等于应用中的设置，否则 Nginx 会先于应用拦截请求。
 
 **3. 重载 Nginx**
 
@@ -410,11 +410,11 @@ nginx -t && systemctl reload nginx
 
 #### 建议配置参考
 
-| 场景 | `client_max_body_size` | `MAX_FILE_SIZE_MB` | `proxy_read_timeout` | 其他建议 |
-|------|----------------------|-------------------|---------------------|---------|
-| 小文件（默认） | `512m` | `512` | `300s` | 无需额外配置 |
-| 中等文件 | `1024m` | `1024` | `3600s` | 设置 `STORAGE_QUOTA_MB` |
-| 大文件（2GB+） | `2048m` 或更大 | `2048` | `86400s` | 必须设置存储配额，限制并发上传数 |
+| 场景 | `client_max_body_size` | 管理后台「单文件大小限制」 | `proxy_read_timeout` | 其他建议 |
+|------|----------------------|-------------------------|---------------------|---------|
+| 小文件 | `512m` | `512` | `300s` | 无需额外配置 |
+| 中等文件 | `2g` | `2048` | `3600s` | 设置存储配额 |
+| 大文件（默认） | `8g` | `8192` | `86400s` | 建议设置存储配额 |
 
 ### 忘记管理员密码
 
