@@ -1,77 +1,335 @@
 # JiahaoDrop 轻量快传
 
-适合 2c2G 云服务器的小型私有文件快传服务。首页只提供登录和“不登录仅接收”，登录后进入 `/app`，后台独立在 `/admin`。
-
-## 快速开始
-
-```bash
-npm install
-npm start
-```
-
-服务健康检查：
-
-```text
-/api/health
-```
-
-第一次部署需要先创建管理员账号，没有默认密码。推荐设置 `INIT_TOKEN` 后在浏览器初始化，也可以运行 `node server.js --init`，或通过 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 环境变量自动初始化。初始化管理员拥有全部设置权限。
-
-## 地址
-
-```text
-首页登录和公开接收：http://服务器IP:3000
-登录后使用页：http://服务器IP:3000/app
-管理后台：http://服务器IP:3000/admin
-分享链接示例：https://你的域名/r/ABC123
-```
+适合 2c2G 云服务器的小型私有文件快传服务。登录后上传文件生成接收码和分享链接，未登录用户可直接输入接收码或打开链接下载。
 
 ## 功能
 
-- 普通用户登录后只有发送和接收权限。
-- 管理员拥有全部设置权限，可进入后台管理用户、系统设置、日志和邮件。
-- 上传后生成接收码和分享链接。
-- 未登录用户可在首页输入接收码，或打开分享链接直接下载。
-- 文件默认 48 小时过期，启动和定时任务都会清理。
-- 后台可配置公网访问域名、文件存放目录、SMTP 邮件服务器。
-- 审计日志记录登录、上传、下载、删除、用户管理和设置变更，可发送到邮箱。
+- 普通用户登录后上传和接收文件
+- 管理员后台管理用户、系统设置、日志和邮件
+- 上传后生成接收码和分享链接，支持二维码扫描
+- 未登录用户可在首页输入接收码或打开分享链接直接下载
+- 文件默认 48 小时过期自动清理
+- 支持 SMTP 邮件通知、邮箱验证码登录
+- 审计日志记录登录、上传、下载、删除、用户管理和设置变更
+- 三级角色体系：超级管理员 / 管理员 / 普通用户
 
-## 常用环境变量
+## 页面地址
+
+| 页面 | 路径 |
+|------|------|
+| 首页（登录/公开接收） | `http://服务器IP:3000` |
+| 登录后使用页 | `http://服务器IP:3000/app/send` |
+| 管理后台 | `http://服务器IP:3000/admin` |
+| 分享链接示例 | `https://你的域名/r/ABC123` |
+
+---
+
+## 环境要求
+
+| 项目 | 最低要求 |
+|------|---------|
+| Node.js | >= 20.x（推荐 LTS） |
+| 操作系统 | Linux / Windows / macOS |
+| 内存 | >= 512MB（推荐 2GB+） |
+| 磁盘 | 根据上传文件量决定 |
+
+---
+
+## 快速开始（本地体验）
+
+### 1. 安装 Node.js
+
+前往 https://nodejs.org 下载安装 **Node.js 20 LTS** 或更高版本。
+
+安装完成后验证：
 
 ```bash
-PORT=3000
-HOST=0.0.0.0
-DATA_DIR=./data
-STORAGE_DIR=./data/storage
-PUBLIC_BASE_URL=https://send.example.com
-SESSION_SECRET=请改成至少32位随机字符串
-MAX_FILE_SIZE_MB=512
-MAX_FILES_PER_UPLOAD=10
-RETENTION_HOURS=48
-COOKIE_SECURE=false
-TRUST_PROXY=false
+node -v   # 应输出 v20.x.x 或更高
+npm -v
 ```
 
-说明：
-
-- `PUBLIC_BASE_URL` 是分享链接使用的公网域名，也可以在后台“设置”里修改。
-- `DATA_DIR` 保存状态文件、临时上传目录和日志状态。
-- `STORAGE_DIR` 是默认上传文件目录，也可以在后台修改。
-- SMTP 密码会用 `SESSION_SECRET` 派生密钥加密后保存；生产环境必须固定设置 `SESSION_SECRET`。
-
-## 生产部署建议
-
-- 用 Nginx 或 Caddy 反向代理并开启 HTTPS。
-- 设置强随机 `SESSION_SECRET`，至少 32 位。
-- HTTPS 反代后设置 `COOKIE_SECURE=true` 和 `TRUST_PROXY=true`。
-- 在后台设置公网访问域名，例如 `https://send.example.com`。
-- 给 `DATA_DIR` 和文件存放目录设置磁盘配额、备份和监控。
-- Nginx 层同步设置上传大小限制，例如 `client_max_body_size 512m;`。
-
-## 常用命令
+### 2. 下载项目
 
 ```bash
-npm run check
-npm audit
+git clone https://github.com/jycf001/File-Transfer-Platform.git
+cd File-Transfer-Platform
+```
+
+### 3. 安装依赖
+
+```bash
+npm install
+```
+
+这会根据 `package.json` 自动安装以下依赖：
+
+| 包名 | 作用 |
+|------|------|
+| `express` | Web 框架，处理 HTTP 请求和路由 |
+| `multer` | 处理文件上传（multipart/form-data） |
+| `helmet` | 设置安全 HTTP 头（CSP、XSS 防护等） |
+| `compression` | gzip 压缩响应，减少传输体积 |
+| `express-rate-limit` | 接口限流，防止暴力破解和滥用 |
+| `nodemailer` | 发送邮件（验证码、日志推送） |
+| `archiver` | 打包多文件为 zip 供下载 |
+
+安装完成后会生成 `node_modules/` 目录和 `package-lock.json` 文件。
+
+### 4. 启动服务
+
+```bash
 npm start
 ```
+
+看到类似输出即启动成功：
+
+```
+[JiahaoDrop] listening on 0.0.0.0:3000
+```
+
+浏览器打开 `http://localhost:3000` 即可访问。
+
+---
+
+## 首次部署：创建管理员
+
+服务首次启动时没有任何用户，需要创建管理员账号。有三种方式：
+
+### 方式一：Web 页面初始化（推荐）
+
+1. 在项目根目录创建 `.env` 文件，添加初始化令牌：
+
+```bash
+INIT_TOKEN=你的初始化令牌（随意填写一个复杂字符串）
+```
+
+2. 启动服务：`npm start`
+3. 浏览器打开 `http://服务器IP:3000`，会显示初始化页面
+4. 输入你设置的 `INIT_TOKEN`，填写用户名、密码、邮箱，点击创建
+
+> 设置 `INIT_TOKEN` 可防止公网暴露时被他人抢先创建管理员。
+
+### 方式二：命令行初始化
+
+```bash
+node server.js --init
+```
+
+按提示输入用户名、密码、邮箱即可。无需公网访问。
+
+### 方式三：环境变量自动初始化
+
+在 `.env` 中设置以下变量，服务首次启动时会自动创建管理员：
+
+```bash
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=你的强密码至少8位
+ADMIN_EMAIL=admin@example.com
+```
+
+> 适合自动化部署。建议创建成功后删除这三个环境变量。
+
+---
+
+## 环境变量配置
+
+在项目根目录创建 `.env` 文件（可参考 `.env.example`）：
+
+```bash
+# 服务监听
+PORT=3000
+HOST=0.0.0.0
+
+# 数据目录
+DATA_DIR=./data
+STORAGE_DIR=./data/storage
+
+# 公网访问域名（分享链接使用）
+PUBLIC_BASE_URL=https://send.example.com
+
+# 会话密钥（生产环境必须设置，至少 32 位随机字符串）
+SESSION_SECRET=
+
+# 会话有效期
+SESSION_HOURS=12
+SESSION_IDLE_MINUTES=30
+
+# 文件限制
+MAX_FILE_SIZE_MB=512
+MAX_FILES_PER_UPLOAD=10
+
+# 文件保留时间（小时）
+RETENTION_HOURS=48
+
+# 总存储空间限制（MB），0 表示不限制
+STORAGE_QUOTA_MB=0
+
+# 安全选项（HTTPS 反代后启用）
+COOKIE_SECURE=false
+TRUST_PROXY=false
+
+# 管理员初始化（首次启动使用，创建后可删除）
+ADMIN_USERNAME=
+ADMIN_PASSWORD=
+ADMIN_EMAIL=
+INIT_TOKEN=
+```
+
+生成随机密钥：
+
+```bash
+openssl rand -hex 32
+```
+
+---
+
+## 生产部署
+
+### 方式一：宝塔面板
+
+1. 宝塔安装 **Node.js 版本管理器**，选择 Node.js 20.x
+2. 上传项目到 `/www/wwwroot/jiahaodrop/`
+3. 终端执行 `cd /www/wwwroot/jiahaodrop && npm install --production`
+4. 创建 `.env` 配置文件
+5. 宝塔 → 网站 → Node项目 → 添加，启动文件填 `server.js`
+6. 配置反向代理，目标 `http://127.0.0.1:3000`
+7. 申请 SSL 证书，开启强制 HTTPS
+8. `.env` 中设置 `COOKIE_SECURE=true` 和 `TRUST_PROXY=true`，重启服务
+
+### 方式二：Linux 手动部署
+
+```bash
+# 1. 安装 Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+sudo apt install -y nodejs
+
+# 2. 上传项目并安装依赖
+cd /www/wwwroot/jiahaodrop
+npm install --production
+
+# 3. 创建 .env 并配置
+cp .env.example .env
+nano .env   # 编辑配置
+
+# 4. 创建 systemd 服务
+sudo tee /etc/systemd/system/jiahaodrop.service << 'EOF'
+[Unit]
+Description=JiahaoDrop File Transfer
+After=network.target
+
+[Service]
+Type=simple
+User=www
+WorkingDirectory=/www/wwwroot/jiahaodrop
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=-/www/wwwroot/jiahaodrop/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 5. 启动并设置开机自启
+sudo systemctl daemon-reload
+sudo systemctl enable jiahaodrop
+sudo systemctl start jiahaodrop
+
+# 6. 查看状态和日志
+sudo systemctl status jiahaodrop
+sudo journalctl -u jiahaodrop -f
+```
+
+### Nginx 反向代理
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name send.example.com;
+
+    ssl_certificate     /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+    client_max_body_size 512m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+
+server {
+    listen 80;
+    server_name send.example.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+重载 Nginx：
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+> 更多部署细节见 [DEPLOY.md](./DEPLOY.md)
+
+---
+
+## 数据备份与迁移
+
+所有运行时数据都在 `data/` 目录下：
+
+```
+data/
+├── state.json          ← 用户、文件记录、设置、日志
+├── .session-secret     ← 会话密钥
+├── storage/            ← 上传的文件实体
+└── tmp/                ← 临时文件（可忽略）
+```
+
+备份或迁移时，复制整个 `data/` 目录到新服务器即可保留所有账户和文件：
+
+```bash
+rsync -avz /旧路径/data/ 新服务器:/新路径/data/
+```
+
+> `.env` 需要在新服务器重新配置（域名/IP 不同）。`node_modules/` 不需要复制，在新服务器执行 `npm install` 即可。
+
+---
+
+## 常见问题
+
+### 服务启动后打不开
+
+1. 检查防火墙是否放行端口（默认 3000）
+2. 云服务器需在安全组中放行端口
+3. 检查服务是否正常：`curl http://127.0.0.1:3000/api/health`
+
+### 上传文件失败
+
+1. 检查 Nginx 的 `client_max_body_size` 是否足够
+2. 检查 `.env` 中的 `MAX_FILE_SIZE_MB`
+3. 检查磁盘空间是否充足
+
+### 忘记管理员密码
+
+- 有其他管理员：登录后台直接重置密码
+- 无可用管理员：停止服务，备份 `data/state.json`，删除后重新初始化
+
+### SMTP 邮件发送失败
+
+1. 后台 → 设置 → SMTP 配置中填写正确的邮件服务器信息
+2. 点击「发送测试邮件」验证
+3. 检查服务器防火墙是否放行 SMTP 端口（465/587）
+
+---
+
+## 许可证
+
+MIT
