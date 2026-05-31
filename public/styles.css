@@ -75,7 +75,7 @@
   }
 }
 
-[data-theme="dark"] {
+:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0b1220;
   --bg-2: #101c31;
@@ -110,7 +110,7 @@
   --dock-glow: rgba(59, 130, 246, 0.12);
 }
 
-[data-theme="light"] {
+:root[data-theme="light"] {
   color-scheme: light;
   --bg: #f3f7fb;
   --bg-2: #e9f0f8;
@@ -544,14 +544,78 @@ label {
 }
 
 .upload-progress {
-  width: min(380px, 100%);
+  width: min(420px, 100%);
   margin: 12px auto 0;
+  padding: 16px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: progress-panel-in 0.3s var(--ease);
+}
+
+@keyframes progress-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.progress-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.progress-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--brand);
+  animation: progress-pulse 2s var(--ease) infinite;
+}
+
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.progress-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.progress-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.progress-filename {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-percent-badge {
+  flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--brand);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
 }
 
 .progress-bar-track {
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
+  height: 10px;
+  border-radius: 5px;
   background: var(--bg-2);
   overflow: hidden;
 }
@@ -559,15 +623,30 @@ label {
 .progress-bar-fill {
   height: 100%;
   width: 0%;
-  border-radius: 3px;
-  background: var(--brand);
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--brand), var(--brand-2));
   transition: width 0.3s var(--ease);
+  position: relative;
+}
+
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: progress-shimmer 1.5s infinite;
+}
+
+@keyframes progress-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
 }
 
 .progress-info {
   display: flex;
   justify-content: space-between;
-  margin-top: 6px;
+  gap: 8px;
+  margin-top: 8px;
   font-size: 12px;
   color: var(--muted);
 }
@@ -651,8 +730,8 @@ label {
 .theme-toggle .icon-sun { display: none; }
 .theme-toggle .icon-moon { display: block; }
 
-[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
-[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) .theme-toggle .icon-sun { display: block; }
@@ -824,13 +903,33 @@ label {
 #userFilesDetailSection {
   margin-top: 32px;
   padding-top: 24px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--line);
+}
+
+.drop-hint {
+  display: grid;
+  justify-items: center;
+  gap: 11px;
 }
 
 .selected-list {
+  width: 100%;
   max-height: 340px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.selected-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--bg-2);
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .retention-row {
@@ -870,6 +969,15 @@ label {
   transform: translateY(-1px);
   border-color: var(--line-2);
   box-shadow: var(--shadow);
+}
+
+.item.warning {
+  border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+}
+
+.item.warning h3 {
+  color: var(--warn);
 }
 
 .item h3 {

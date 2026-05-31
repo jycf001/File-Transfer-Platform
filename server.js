@@ -912,10 +912,6 @@ async function handleFileDownload(file, req, res, { byCode = false, isPublic = f
   await saveState();
 }
 
-function hasExecutable(uploaded) {
-  return uploaded.some((file) => path.extname(sanitizeOriginalName(file.originalname)).toLowerCase() === '.exe');
-}
-
 function zipDisplayName(uploaded, code) {
   if (uploaded.length === 1) {
     const original = sanitizeOriginalName(uploaded[0].originalname);
@@ -949,7 +945,7 @@ async function createZipFromUploadedFiles(uploaded, targetPath) {
   try {
     await new Promise((resolve, reject) => {
       const output = fs.createWriteStream(targetPath, { mode: 0o600 });
-      const archive = archiver('zip', { zlib: { level: 9 } });
+      const archive = archiver('zip', { zlib: { level: 3 } });
       const usedNames = new Set();
 
       output.on('close', resolve);
@@ -2120,14 +2116,29 @@ app.post('/api/admin/reset', requireAuth, requireSuperAdmin, asyncRoute(async (r
 app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => withUploadLock(async () => {
   const uploaded = Array.isArray(req.files) ? req.files : [];
   if (uploaded.length === 0) return res.status(400).json({ error: '请选择要上传的文件' });
+
+  const blockedExts = new Set([
+    'exe', 'bat', 'cmd', 'com', 'msi', 'scr', 'ps1', 'vbs', 'wsf', 'hta', 'cpl', 'pif', 'jse', 'wsh',
+    'sh', 'bash', 'csh', 'ksh', 'zsh', 'run', 'elf', 'appimage',
+    'command', 'pkg', 'dmg', 'dylib', 'so', 'deb', 'rpm'
+  ]);
+  const blocked = uploaded.filter((file) => {
+    const ext = path.extname(sanitizeOriginalName(file.originalname)).toLowerCase().replace('.', '');
+    return ext && blockedExts.has(ext);
+  });
+  if (blocked.length > 0) {
+    await Promise.all(uploaded.map((file) => fsp.rm(file.path, { force: true }).catch(() => {})));
+    const names = blocked.map((f) => sanitizeOriginalName(f.originalname)).join('、');
+    return res.status(400).json({ error: `可执行文件不允许直接上传，请压缩为 zip 后再试: ${names}` });
+  }
+
   let retentionHours = parseRetentionHours(req.body.retentionHours);
   // 普通用户不能设置永久保留
   if (retentionHours === 0 && req.user.role === 'user') retentionHours = getRetentionHours();
   const maxDownloads = validateMaxDownloads(req.body.maxDownloads);
   const now = nowIso();
   const code = makeCode();
-  const batchHasExe = hasExecutable(uploaded);
-  const shouldZipBatch = uploaded.length > 1 || batchHasExe;
+  const shouldZipBatch = uploaded.length > 1;
   const quota = getStorageQuotaMb();
   if (quota > 0) {
     const currentBytes = getCurrentStorageBytes();
@@ -2173,8 +2184,7 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
         retentionHours,
         maxDownloads,
         bundle: {
-          sourceCount: uploaded.length,
-          containsExecutable: batchHasExe
+          sourceCount: uploaded.length
         },
         downloadCount: 0,
         downloadLog: []
@@ -2220,8 +2230,7 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
       bytes: created.reduce((sum, file) => sum + file.size, 0),
       batchCode: code,
       sourceCount: uploaded.length,
-      zipped: shouldZipBatch,
-      containsExecutable: batchHasExe
+      zipped: shouldZipBatch
     });
     await saveState();
   } catch (error) {

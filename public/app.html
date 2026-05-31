@@ -43,12 +43,14 @@
         <section class="view active" id="sendView">
           <div class="upload-zone" id="dropZone">
             <input id="fileInput" type="file" multiple hidden>
-            <div class="upload-icon">+</div>
-            <h2>拖拽文件到这里</h2>
-            <p id="uploadLimit">或点击选择文件</p>
-            <button class="primary" id="pickBtn" type="button">选择文件</button>
+            <div class="drop-hint" id="dropHint">
+              <div class="upload-icon">+</div>
+              <h2>拖拽文件到这里</h2>
+              <p id="uploadLimit">或点击选择文件</p>
+              <button class="primary" id="pickBtn" type="button">选择文件</button>
+            </div>
+            <div class="selected-list" id="selectedList" hidden></div>
           </div>
-          <div class="selected-list" id="selectedList" hidden></div>
           <div class="retention-row" id="retentionRow" hidden>
             <label>有效期
               <select id="retentionSelect">
@@ -67,21 +69,29 @@
           </div>
           <button class="primary wide" id="uploadBtn" type="button" disabled hidden>开始上传</button>
           <div class="upload-progress" id="uploadProgress" hidden>
+            <div class="progress-header">
+              <svg class="progress-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <div class="progress-text">
+                <span class="progress-title" id="progressTitle">正在上传</span>
+                <span class="progress-filename" id="progressFilename"></span>
+              </div>
+              <span class="progress-percent-badge" id="progressPercent">0%</span>
+            </div>
             <div class="progress-bar-track">
               <div class="progress-bar-fill" id="progressFill"></div>
             </div>
             <div class="progress-info">
-              <span id="progressPercent">0%</span>
               <span id="progressSpeed">计算中...</span>
+              <span id="progressEta"></span>
               <span id="progressSize">0 / 0 MB</span>
             </div>
           </div>
           <p class="upload-legal-tip" data-brand="legal">请勿传输违法违规内容，所有操作均记录审计日志。</p>
-          <div class="upload-results-toolbar">
+          <div class="upload-results-toolbar" hidden>
             <h3>最近上传</h3>
             <button class="small-btn" id="toggleUploadResultsBtn" type="button" hidden>展开全部</button>
           </div>
-          <div class="result-grid" id="uploadResults"></div>
+          <div class="result-grid" id="uploadResults" hidden></div>
         </section>
 
         <section class="view" id="receiveView">

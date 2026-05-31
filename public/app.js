@@ -21,6 +21,7 @@ const elements = {
   accountBadge: $('#accountBadge'),
   logoutBtn: $('#logoutBtn'),
   dropZone: $('#dropZone'),
+  dropHint: $('#dropHint'),
   fileInput: $('#fileInput'),
   pickBtn: $('#pickBtn'),
   uploadBtn: $('#uploadBtn'),
@@ -29,12 +30,16 @@ const elements = {
   retentionSelect: $('#retentionSelect'),
   maxDownloadsInput: $('#maxDownloadsInput'),
   uploadResults: $('#uploadResults'),
+  uploadResultsToolbar: $('.upload-results-toolbar'),
   toggleUploadResultsBtn: $('#toggleUploadResultsBtn'),
   uploadProgress: $('#uploadProgress'),
   progressFill: $('#progressFill'),
   progressPercent: $('#progressPercent'),
   progressSpeed: $('#progressSpeed'),
   progressSize: $('#progressSize'),
+  progressEta: $('#progressEta'),
+  progressTitle: $('#progressTitle'),
+  progressFilename: $('#progressFilename'),
   uploadLimit: $('#uploadLimit'),
   codeForm: $('#codeForm'),
   codeInput: $('#codeInput'),
@@ -92,6 +97,14 @@ function paintAvatar(username) {
   elements.avatar.style.setProperty('--avatar-c', `hsl(${(seed + 108) % 360} 70% 42%)`);
 }
 
+function formatEta(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '--:--';
+  const s = Math.ceil(seconds);
+  if (s < 60) return `${s}秒`;
+  if (s < 3600) return `${Math.floor(s / 60)}分${s % 60}秒`;
+  return `${Math.floor(s / 3600)}时${Math.floor((s % 3600) / 60)}分`;
+}
+
 function modeFromPath() {
   if (window.location.pathname.endsWith('/receive')) return 'receive';
   if (window.location.pathname.endsWith('/files')) return 'files';
@@ -107,7 +120,6 @@ function setMode(mode, push = true) {
   if (shell) shell.scrollTop = 0;
   const route = $(`.nav-btn[data-view="${mode}"]`)?.dataset.route || '/app/send';
   if (push && window.location.pathname !== route) history.pushState({ mode }, '', route);
-  if (mode === 'send') loadRecentUploads();
   if (mode === 'files') loadFiles();
   if (mode === 'account') renderAccount();
 }
@@ -156,7 +168,8 @@ window.addEventListener('popstate', () => setMode(modeFromPath(), false));
 
 elements.pickBtn.addEventListener('click', () => elements.fileInput.click());
 elements.dropZone.addEventListener('click', (event) => {
-  if (event.target === elements.dropZone) elements.fileInput.click();
+  if (event.target.closest('.selected-list') || event.target.closest('#pickBtn')) return;
+  if (event.target === elements.dropZone || event.target.closest('.drop-hint')) elements.fileInput.click();
 });
 
 elements.fileInput.addEventListener('change', () => {
@@ -188,18 +201,22 @@ function renderSelectedFiles() {
   const files = state.selectedFiles;
   const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload || 10));
   const tooMany = files.length > maxFiles;
-  elements.uploadBtn.disabled = files.length === 0 || tooMany;
-  elements.uploadBtn.hidden = files.length === 0;
-  elements.selectedList.hidden = files.length === 0;
-  elements.retentionRow.hidden = files.length === 0;
-  if (files.length === 0) {
+  const hasFiles = files.length > 0;
+  elements.uploadBtn.disabled = !hasFiles || tooMany;
+  elements.uploadBtn.hidden = !hasFiles;
+  elements.retentionRow.hidden = !hasFiles;
+  if (elements.dropHint) elements.dropHint.hidden = hasFiles;
+  elements.selectedList.hidden = !hasFiles;
+  if (!hasFiles) {
     elements.selectedList.innerHTML = '';
     return;
   }
+  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  const summaryHtml = `<div class="selected-summary"><span>${files.length} 个文件</span><span>${formatSize(totalSize)}</span></div>`;
   const warningHtml = tooMany
     ? `<div class="item warning"><div><h3>文件数量超过限制</h3><div class="meta">当前选择 ${escapeHtml(files.length)} 个，单次最多 ${escapeHtml(maxFiles)} 个，请移除多余文件。</div></div></div>`
     : '';
-  elements.selectedList.innerHTML = warningHtml + files.map((file, index) => `
+  elements.selectedList.innerHTML = summaryHtml + warningHtml + files.map((file, index) => `
     <div class="item">
       <div>
         <h3>${escapeHtml(file.name)}</h3>
@@ -250,6 +267,20 @@ elements.uploadBtn.addEventListener('click', async () => {
       return;
     }
   }
+  const blockedExts = new Set([
+    'exe', 'bat', 'cmd', 'com', 'msi', 'scr', 'ps1', 'vbs', 'wsf', 'hta', 'cpl', 'pif', 'jse', 'wsh',
+    'sh', 'bash', 'csh', 'ksh', 'zsh', 'run', 'elf', 'appimage',
+    'command', 'pkg', 'dmg', 'dylib', 'so', 'deb', 'rpm'
+  ]);
+  const blockedFiles = state.selectedFiles.filter((file) => {
+    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+    return ext && blockedExts.has(ext);
+  });
+  if (blockedFiles.length > 0) {
+    const names = blockedFiles.map((f) => f.name).join('、');
+    toast(`为保障安全，请将可执行文件压缩为 zip 后再上传: ${names}`);
+    return;
+  }
   const formData = new FormData();
   state.selectedFiles.forEach((file) => formData.append('files', file));
   formData.append('retentionHours', elements.retentionSelect.value);
@@ -259,6 +290,12 @@ elements.uploadBtn.addEventListener('click', async () => {
   elements.uploadProgress.hidden = false;
   elements.progressFill.style.width = '0%';
   elements.progressPercent.textContent = '0%';
+  if (elements.progressTitle) elements.progressTitle.textContent = '正在上传';
+  if (elements.progressFilename) {
+    const names = state.selectedFiles.map((f) => f.name);
+    elements.progressFilename.textContent = names.length === 1 ? names[0] : `${names.length} 个文件`;
+  }
+  if (elements.progressEta) elements.progressEta.textContent = '';
   elements.progressSpeed.textContent = '计算中...';
   elements.progressSize.textContent = `0 / ${formatSize(state.selectedFiles.reduce((s, f) => s + f.size, 0))}`;
   try {
@@ -267,39 +304,50 @@ elements.uploadBtn.addEventListener('click', async () => {
     const result = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/files');
+      xhr.timeout = 30 * 60 * 1000;
       if (state.csrfToken) xhr.setRequestHeader('X-CSRF-Token', state.csrfToken);
       xhr.upload.onprogress = (e) => {
         if (!e.lengthComputable) return;
         const percent = Math.round((e.loaded / e.total) * 100);
         const elapsed = (Date.now() - startTime) / 1000;
         const speed = elapsed > 0 ? e.loaded / elapsed : 0;
+        const remaining = speed > 0 ? (e.total - e.loaded) / speed : 0;
         elements.progressFill.style.width = `${percent}%`;
         elements.progressPercent.textContent = `${percent}%`;
         elements.progressSpeed.textContent = speed > 0 ? `${formatSize(speed)}/s` : '计算中...';
+        if (elements.progressEta) elements.progressEta.textContent = percent < 100 ? `剩余 ${formatEta(remaining)}` : '';
         elements.progressSize.textContent = `${formatSize(e.loaded)} / ${formatSize(e.total)}`;
       };
       xhr.onload = () => {
+        if (elements.progressTitle) elements.progressTitle.textContent = '服务端处理中...';
+        if (elements.progressEta) elements.progressEta.textContent = '';
+        elements.progressSpeed.textContent = '请稍候';
         try {
           const data = JSON.parse(xhr.responseText);
           if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-          else reject(new Error(data?.error || '请求失败'));
+          else reject(new Error(data?.error || `请求失败 (HTTP ${xhr.status})`));
         } catch {
           if (xhr.status === 413) reject(new Error('文件超过服务器大小限制'));
-          else reject(new Error('请求失败'));
+          else if (xhr.responseText) reject(new Error(`服务器响应异常 (HTTP ${xhr.status})`));
+          else reject(new Error(`请求失败 (HTTP ${xhr.status})，服务器未返回有效响应`));
         }
       };
-      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.onerror = () => reject(new Error('网络错误，请检查连接'));
+      xhr.ontimeout = () => reject(new Error('上传超时，文件可能过大或服务器处理时间过长'));
       xhr.send(formData);
     });
     state.storageUsedBytes += totalSize;
     state.selectedFiles = [];
     elements.fileInput.value = '';
     renderSelectedFiles();
+    if (elements.uploadResultsToolbar) elements.uploadResultsToolbar.hidden = false;
+    if (elements.uploadResults) elements.uploadResults.hidden = false;
     await loadRecentUploads();
     toast('上传完成');
   } catch (error) {
     toast(error.message);
   } finally {
+    elements.uploadBtn.hidden = state.selectedFiles.length === 0;
     elements.uploadBtn.disabled = state.selectedFiles.length === 0;
     elements.uploadBtn.textContent = '开始上传';
     elements.uploadProgress.hidden = true;
@@ -309,6 +357,11 @@ elements.uploadBtn.addEventListener('click', async () => {
 function renderUploadResults(files = state.recentUploads) {
   state.recentUploads = Array.isArray(files) ? files : [];
   const total = state.recentUploads.length;
+  if (total === 0) {
+    if (elements.uploadResultsToolbar) elements.uploadResultsToolbar.hidden = true;
+    if (elements.uploadResults) elements.uploadResults.hidden = true;
+    return;
+  }
   const hasMore = total > 2;
   if (elements.toggleUploadResultsBtn) {
     elements.toggleUploadResultsBtn.hidden = !hasMore;
@@ -316,10 +369,6 @@ function renderUploadResults(files = state.recentUploads) {
     elements.toggleUploadResultsBtn.setAttribute('aria-expanded', String(state.uploadResultsExpanded));
   }
   const visible = state.uploadResultsExpanded || !hasMore ? state.recentUploads : state.recentUploads.slice(0, 2);
-  if (visible.length === 0) {
-    elements.uploadResults.innerHTML = '<div class="item"><div><h3>暂无已上传文件</h3><div class="meta">上传后会在这里显示最近文件。</div></div></div>';
-    return;
-  }
   elements.uploadResults.innerHTML = visible.map((file) => {
     const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
     const retention = file.retentionHours || 48;
@@ -348,8 +397,9 @@ async function loadRecentUploads() {
       state.uploadResultsExpanded = false;
     }
     renderUploadResults(result.files);
-  } catch (error) {
-    elements.uploadResults.innerHTML = '<div class="item"><div><h3>最近文件加载失败</h3><div class="meta">请稍后重试。</div></div></div>';
+  } catch {
+    if (elements.uploadResultsToolbar) elements.uploadResultsToolbar.hidden = true;
+    if (elements.uploadResults) elements.uploadResults.hidden = true;
   }
 }
 
