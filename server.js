@@ -181,11 +181,9 @@ function recordLoginFailure(ip) {
   record.count += 1;
   if (record.count >= 5) {
     record.lockCount = (record.lockCount || 0) + 1;
-    // 锁定时间递增：第1次 1分钟，第2次 5分钟，第3次 15分钟
     const lockMinutes = record.lockCount >= 3 ? 15 : record.lockCount >= 2 ? 5 : 1;
     record.blockedUntil = now + lockMinutes * 60 * 1000;
-    record.count = 0;
-    record.firstAt = now;
+    // 不重置 count/firstAt，锁定解除后仍在同一窗口内累计
   }
 }
 
@@ -1890,19 +1888,21 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (r
     // 无条件删除目标用户所有会话
     const isSelf = user.id === req.user.id;
     state.sessions = state.sessions.filter((session) => session.userId !== user.id);
-    // 若修改的是自己的密码，重新签发当前会话
+    // 若修改的是自己的密码，签发全新会话（新 token + 新 csrfToken）
     if (isSelf) {
+      const newToken = randomId(32);
       const newSession = {
         id: randomId(),
         userId: user.id,
-        tokenHash: req.session.tokenHash,
-        csrfToken: req.session.csrfToken,
+        tokenHash: hashToken(newToken),
+        csrfToken: randomId(24),
         expiresAt: addHours(nowIso(), sessionAbsoluteHours()),
         createdAt: nowIso(),
         lastSeenAt: nowIso()
       };
       state.sessions.push(newSession);
       req.session = newSession;
+      setSessionCookie(res, newToken);
     }
   }
   addLog('admin.user_updated', req, { username: user.username, role: user.role, disabled: user.disabled, emailChanged: req.body.email !== undefined, passwordChanged: req.body.password !== undefined });
@@ -2113,7 +2113,9 @@ app.post('/api/admin/reset', requireAuth, requireSuperAdmin, asyncRoute(async (r
 app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => withUploadLock(async () => {
   const uploaded = Array.isArray(req.files) ? req.files : [];
   if (uploaded.length === 0) return res.status(400).json({ error: '请选择要上传的文件' });
-  const retentionHours = parseRetentionHours(req.body.retentionHours);
+  let retentionHours = parseRetentionHours(req.body.retentionHours);
+  // 普通用户不能设置永久保留
+  if (retentionHours === 0 && req.user.role === 'user') retentionHours = getRetentionHours();
   const maxDownloads = validateMaxDownloads(req.body.maxDownloads);
   const now = nowIso();
   const code = makeCode();
@@ -2333,7 +2335,8 @@ app.patch('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   if (!file) return res.status(404).json({ error: '文件不存在' });
   if (file.ownerId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权修改该文件' });
   if (req.body.retentionHours !== undefined) {
-    const retentionHours = parseRetentionHours(req.body.retentionHours);
+    let retentionHours = parseRetentionHours(req.body.retentionHours);
+    if (retentionHours === 0 && req.user.role === 'user') retentionHours = getRetentionHours();
     file.retentionHours = retentionHours;
     file.expiresAt = retentionHours === 0 ? null : addHours(nowIso(), retentionHours);
   }

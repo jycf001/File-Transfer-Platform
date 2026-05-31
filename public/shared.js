@@ -65,7 +65,7 @@ window.JiahaoDrop = (() => {
     const svg = doc.querySelector('svg');
     if (!svg) return '';
     // 移除危险元素
-    const dangerousTags = ['script', 'foreignobject', 'iframe', 'embed', 'object', 'a', 'use'];
+    const dangerousTags = ['script', 'foreignobject', 'iframe', 'embed', 'object', 'a', 'use', 'set', 'animate', 'animatetransform', 'animatemotion', 'style'];
     for (const tag of dangerousTags) {
       for (const el of svg.querySelectorAll(tag)) el.remove();
     }
