@@ -98,7 +98,11 @@ window.JiahaoDrop = (() => {
     const response = await fetch(path, { ...options, headers });
     const type = response.headers.get('content-type') || '';
     const data = type.includes('application/json') ? await response.json() : null;
-    if (!response.ok) throw new Error(data?.error || '请求失败');
+    if (!response.ok) {
+      if (data?.error) throw new Error(data.error);
+      if (response.status === 413) throw new Error('文件超过服务器大小限制，请联系管理员检查 nginx 配置');
+      throw new Error('请求失败');
+    }
     return data;
   }
 

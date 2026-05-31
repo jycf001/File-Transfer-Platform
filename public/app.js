@@ -229,6 +229,14 @@ elements.uploadBtn.addEventListener('click', async () => {
     renderSelectedFiles();
     return;
   }
+  const maxFileSizeMb = Number(state.limits.maxFileSizeMb || 512);
+  const maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+  const oversized = state.selectedFiles.filter((file) => file.size > maxFileSizeBytes);
+  if (oversized.length > 0) {
+    const names = oversized.map((f) => `${f.name} (${formatSize(f.size)})`).join('、');
+    toast(`以下文件超过 ${maxFileSizeMb} MB 限制: ${names}`);
+    return;
+  }
   if (state.storageQuotaMb > 0) {
     const incomingBytes = state.selectedFiles.reduce((sum, file) => sum + file.size, 0);
     const quotaBytes = state.storageQuotaMb * 1024 * 1024;

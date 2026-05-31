@@ -16,7 +16,9 @@ import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const archiver = archiverModule.default || archiverModule;
+const archiver = typeof archiverModule.default === 'function'
+  ? archiverModule.default
+  : (format, options) => new archiverModule.Archiver(format, options);
 
 // 优先使用 IPv4，避免服务器无 IPv6 网络时 SMTP 等连接失败
 dns.setDefaultResultOrder('ipv4first');
@@ -944,24 +946,29 @@ function uniqueArchiveEntryName(name, used) {
 }
 
 async function createZipFromUploadedFiles(uploaded, targetPath) {
-  await new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(targetPath, { mode: 0o600 });
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    const usedNames = new Set();
+  try {
+    await new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(targetPath, { mode: 0o600 });
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      const usedNames = new Set();
 
-    output.on('close', resolve);
-    output.on('error', reject);
-    archive.on('error', reject);
-    archive.on('warning', (error) => {
-      if (error.code !== 'ENOENT') reject(error);
+      output.on('close', resolve);
+      output.on('error', reject);
+      archive.on('error', reject);
+      archive.on('warning', (error) => {
+        if (error.code !== 'ENOENT') reject(error);
+      });
+
+      archive.pipe(output);
+      for (const file of uploaded) {
+        archive.file(file.path, { name: uniqueArchiveEntryName(file.originalname, usedNames) });
+      }
+      Promise.resolve(archive.finalize()).catch(reject);
     });
-
-    archive.pipe(output);
-    for (const file of uploaded) {
-      archive.file(file.path, { name: uniqueArchiveEntryName(file.originalname, usedNames) });
-    }
-    Promise.resolve(archive.finalize()).catch(reject);
-  });
+  } catch (err) {
+    const details = err.message || String(err);
+    throw new Error(`文件打包失败: ${details}`);
+  }
   const stat = await fsp.stat(targetPath);
   return stat.size;
 }
@@ -2467,7 +2474,11 @@ app.use((error, req, res, next) => {
   if (error.message === '不能把磁盘根目录作为文件存放目录') return res.status(400).json({ error: error.message });
   if (error.message === '单文件大小限制需在 1-10240 MB 之间') return res.status(400).json({ error: error.message });
   if (error.message === '下载次数限制需为 0-100000，0 表示不限') return res.status(400).json({ error: error.message });
-  console.error(error);
+  console.error('[unhandled]', error);
+  const msg = error.message || '';
+  if (msg.includes('文件打包失败')) return res.status(500).json({ error: msg });
+  if (msg.includes('ENOSPC')) return res.status(500).json({ error: '服务器磁盘空间不足' });
+  if (msg.includes('EACCES') || msg.includes('EPERM')) return res.status(500).json({ error: '服务器文件权限错误' });
   return res.status(500).json({ error: '服务器内部错误' });
 });
 
