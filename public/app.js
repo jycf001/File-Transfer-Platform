@@ -243,6 +243,11 @@ function downloadLimitText(file) {
   return `下载 ${count}/${max} 次 · 剩余 ${remaining} 次`;
 }
 
+function retentionText(file) {
+  const h = file.retentionHours ?? 48;
+  return h === 0 ? '永久保留' : `${h}小时后过期`;
+}
+
 elements.uploadBtn.addEventListener('click', async () => {
   if (state.selectedFiles.length === 0) return;
   const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload || 10));
@@ -371,12 +376,11 @@ function renderUploadResults(files = state.recentUploads) {
   const visible = state.uploadResultsExpanded || !hasMore ? state.recentUploads : state.recentUploads.slice(0, 2);
   elements.uploadResults.innerHTML = visible.map((file) => {
     const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
-    const retention = file.retentionHours || 48;
     return `
       <div class="item">
         <div>
           <h3>${escapeHtml(file.name)}</h3>
-          <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retention)}小时后过期 · ${escapeHtml(downloadLimitText(file))}</div>
+          <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText(file))} · ${escapeHtml(downloadLimitText(file))}</div>
           <div class="meta share-line">${escapeHtml(shareUrl)}</div>
         </div>
         <div class="actions">
@@ -436,7 +440,7 @@ elements.codeForm.addEventListener('submit', async (event) => {
       <div class="item">
         <div>
           <h3>${escapeHtml(file.name)}</h3>
-          <div class="meta">发送者 ${escapeHtml(file.owner)} · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(file.retentionHours || 48)}小时后过期 · ${escapeHtml(downloadLimitText(file))}</div>
+          <div class="meta">发送者 ${escapeHtml(file.owner)} · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText(file))} · ${escapeHtml(downloadLimitText(file))}</div>
         </div>
         <div class="actions">
           <a class="small-btn" href="/api/public/files/code/${encodeURIComponent(file.code)}/download">下载</a>
@@ -577,7 +581,7 @@ function showFileDetail(file) {
       <div class="modal-meta">
         <span>接收码 <strong>${escapeHtml(file.code)}</strong></span>
         <span>${escapeHtml(formatSize(file.size))}</span>
-        <span>${escapeHtml(file.retentionHours || 48)}小时后过期</span>
+        <span>${escapeHtml(retentionText(file))}</span>
         <span>${escapeHtml(downloadLimitText(file))}</span>
       </div>
       <h4>下载记录</h4>

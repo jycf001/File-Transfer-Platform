@@ -36,10 +36,12 @@ function showFile(file) {
 
   elements.fileIcon.textContent = fileIconFor(file.name);
   elements.fileName.textContent = file.name;
+  const h = file.retentionHours ?? 48;
+  const retention = h === 0 ? '永久保留' : `${h}小时后过期`;
   elements.fileMeta.innerHTML = [
     `发送者 ${escapeHtml(file.owner)}`,
     escapeHtml(formatSize(file.size)),
-    `${escapeHtml(file.retentionHours || 48)}小时后过期`,
+    escapeHtml(retention),
     escapeHtml(downloadLimitText(file))
   ].map(t => `<span>${t}</span>`).join('');
   elements.downloadBtn.href = `/api/public/files/code/${encodeURIComponent(file.code)}/download`;

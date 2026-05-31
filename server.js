@@ -2184,7 +2184,7 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
         size: zipSize,
         mimeType: 'application/zip',
         createdAt: now,
-        expiresAt: addHours(now, retentionHours),
+        expiresAt: retentionHours === 0 ? null : addHours(now, retentionHours),
         retentionHours,
         maxDownloads,
         bundle: {
@@ -2219,7 +2219,7 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
           size: file.size,
           mimeType: file.mimetype || 'application/octet-stream',
           createdAt: now,
-          expiresAt: addHours(now, retentionHours),
+          expiresAt: retentionHours === 0 ? null : addHours(now, retentionHours),
           retentionHours,
           maxDownloads,
           downloadCount: 0,
