@@ -136,6 +136,7 @@ const maxDownloadLogEntries = 100;
 const emailCodeTtlMs = 30 * 60 * 1000;
 const captchaStore = new Map();
 const emailCodeStore = new Map();
+const publicDownloadStore = new Map();
 let cachedMailer = null;
 let cachedMailerKey = '';
 const bruteForceStore = new Map(); // ip -> { count, firstAt, blockedUntil }
@@ -264,6 +265,9 @@ function cleanupTransientChallenges() {
   }
   for (const [id, challenge] of emailCodeStore.entries()) {
     if (challenge.expiresAt <= now) emailCodeStore.delete(id);
+  }
+  for (const [tokenHash, ticket] of publicDownloadStore.entries()) {
+    if (ticket.expiresAt <= now) publicDownloadStore.delete(tokenHash);
   }
   state.emailChallenges = state.emailChallenges.filter((challenge) => Number(challenge.expiresAt || 0) > now);
 }
@@ -422,6 +426,14 @@ function hashToken(token) {
   return crypto.createHmac('sha256', getSecret()).update(token).digest('hex');
 }
 
+function hashShareToken(token) {
+  return hashToken(`share:${token}`);
+}
+
+function hashPublicDownloadToken(token) {
+  return hashToken(`public-download:${token}`);
+}
+
 function encryptionKey() {
   return crypto.createHash('sha256').update(getSecret()).digest();
 }
@@ -532,6 +544,14 @@ function validateEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
 }
 
+function normalizeDisplayName(value) {
+  return String(value || '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24);
+}
+
 function maskEmail(email) {
   const normalized = normalizeEmail(email);
   const [name, domain] = normalized.split('@');
@@ -567,6 +587,7 @@ function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
+    displayName: user.displayName || '',
     email: user.email || '',
     role: user.role,
     disabled: Boolean(user.disabled),
@@ -778,13 +799,74 @@ function requestBaseUrl(req) {
 
 function shareUrlFor(code, req) {
   const base = state.settings.publicBaseUrl || requestBaseUrl(req);
-  return `${base}/r/${encodeURIComponent(code)}`;
+  if (typeof code === 'object' && code) {
+    const token = decryptSecret(code.shareTokenEnc || '');
+    return token ? `${base}/s/${encodeURIComponent(token)}` : '';
+  }
+  return '';
+}
+
+function generateShareToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+function attachShareCredential(file) {
+  let token = '';
+  let tokenHash = '';
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    token = generateShareToken();
+    tokenHash = hashShareToken(token);
+    if (!state.files.some((item) => item.id !== file.id && item.shareTokenHash === tokenHash)) break;
+  }
+  if (!token || state.files.some((item) => item.id !== file.id && item.shareTokenHash === tokenHash)) {
+    throw new Error('分享链接生成失败，请重试');
+  }
+  file.shareTokenHash = tokenHash;
+  file.shareTokenEnc = encryptSecret(token);
+  file.shareRotatedAt = nowIso();
+  return token;
+}
+
+function findFileByShareToken(token) {
+  const raw = String(token || '').trim();
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(raw)) return null;
+  const tokenHash = hashShareToken(raw);
+  return state.files.find((file) => file.shareTokenHash === tokenHash && !isExpiredFile(file)) || null;
+}
+
+function issuePublicDownloadToken(file) {
+  cleanupTransientChallenges();
+  const token = randomId(32);
+  publicDownloadStore.set(hashPublicDownloadToken(token), {
+    fileId: file.id,
+    expiresAt: Date.now() + 10 * 60 * 1000
+  });
+  return token;
+}
+
+function revokePublicDownloadTokensForFile(fileId) {
+  for (const [tokenHash, ticket] of publicDownloadStore.entries()) {
+    if (ticket.fileId === fileId) publicDownloadStore.delete(tokenHash);
+  }
+}
+
+function takePublicDownloadFile(token) {
+  cleanupTransientChallenges();
+  const tokenHash = hashPublicDownloadToken(String(token || ''));
+  const ticket = publicDownloadStore.get(tokenHash);
+  if (!ticket || ticket.expiresAt <= Date.now()) {
+    publicDownloadStore.delete(tokenHash);
+    return null;
+  }
+  publicDownloadStore.delete(tokenHash);
+  return state.files.find((file) => file.id === ticket.fileId && !isExpiredFile(file)) || null;
 }
 
 function publicFilePayload(file, req) {
   const downloadCount = file.downloadCount ?? (file.downloadLog || []).length;
   const maxDownloads = normalizeMaxDownloads(file.maxDownloads);
   const remainingDownloads = maxDownloads > 0 ? Math.max(maxDownloads - downloadCount, 0) : null;
+  const owner = state.users.find((user) => user.id === file.ownerId);
   return {
     id: file.id,
     code: file.code,
@@ -796,8 +878,15 @@ function publicFilePayload(file, req) {
     downloadCount,
     maxDownloads,
     remainingDownloads,
-    owner: state.users.find((user) => user.id === file.ownerId)?.username || 'unknown',
-    shareUrl: shareUrlFor(file.code, req)
+    owner: owner ? (owner.displayName || owner.username) : 'unknown',
+    shareUrl: shareUrlFor(file, req)
+  };
+}
+
+function publicFileLookupPayload(file, req) {
+  return {
+    file: publicFilePayload(file, req),
+    downloadToken: issuePublicDownloadToken(file)
   };
 }
 
@@ -863,7 +952,7 @@ function contentDispositionForDownload(name) {
 async function handleFileDownload(file, req, res, { byCode = false, isPublic = false } = {}) {
   if (!file) return res.status(404).json({ error: '文件不存在或已过期' });
   if (isExpiredFile(file)) return res.status(404).json({ error: '文件不存在或已过期' });
-  if (!isPublic && file.ownerId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
+  if (!isPublic && file.ownerId !== req.user.id && req.user.role !== 'super_admin') {
     return res.status(403).json({ error: '无权下载该文件' });
   }
   const maxDownloads = normalizeMaxDownloads(file.maxDownloads);
@@ -1058,6 +1147,11 @@ function isExpiredFile(file) {
   if (file.retentionHours === 0) return false; // 永久保留
   if (!file.expiresAt) return false;
   return Date.now() > new Date(file.expiresAt).getTime();
+}
+
+function isFileOwnerDisabled(file) {
+  const owner = state.users.find((u) => u.id === file.ownerId);
+  return owner && owner.disabled;
 }
 
 function recordDownload(file, req) {
@@ -1302,7 +1396,7 @@ function requireSuperAdmin(req, res, next) {
 function csrfGuard(req, res, next) {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
   // 登录/初始化时还没有 session，无法校验 CSRF，靠验证码 + originGuard 保护
-  const noSessionPaths = ['/api/login', '/api/login/email', '/api/login/email/verify', '/api/setup', '/api/register', '/api/register/verify'];
+  const noSessionPaths = ['/api/login', '/api/login/email', '/api/login/email/verify', '/api/setup', '/api/register', '/api/register/verify', '/api/public/files/lookup'];
   if (noSessionPaths.includes(req.path)) return next();
   const token = req.get('x-csrf-token') || '';
   if (!req.session || !token || !timingSafeEqualText(token, req.session.csrfToken)) {
@@ -1806,6 +1900,15 @@ app.put('/api/account/email', requireAuth, asyncRoute(async (req, res) => {
   res.json({ ok: true, user: publicUser(req.user) });
 }));
 
+app.patch('/api/account/profile', requireAuth, asyncRoute(async (req, res) => {
+  if (req.body.displayName !== undefined) {
+    req.user.displayName = normalizeDisplayName(req.body.displayName);
+  }
+  addLog('account.profile_updated', req, { displayNameSet: Boolean(req.user.displayName) });
+  await saveState();
+  res.json({ ok: true, user: publicUser(req.user) });
+}));
+
 app.get('/api/me', requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user), csrfToken: req.session.csrfToken });
 });
@@ -1848,6 +1951,7 @@ app.post('/api/admin/users', requireAuth, requireAdmin, asyncRoute(async (req, r
     if (req.user.role !== 'super_admin') return res.status(403).json({ error: '只有超级管理员可以创建超级管理员' });
     role = 'super_admin';
   } else if (requestedRole === 'admin') {
+    if (req.user.role !== 'super_admin') return res.status(403).json({ error: '只有超级管理员可以创建管理员' });
     role = 'admin';
   }
   if (!validateUsername(username)) return res.status(400).json({ error: '用户名需为 3-32 位小写字母、数字、点、横线或下划线' });
@@ -1880,6 +1984,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (r
   if (!user) return res.status(404).json({ error: '用户不存在' });
   // 普通管理员不能修改超级管理员账号
   if (user.role === 'super_admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权修改超级管理员账号' });
+  if (user.role === 'admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权修改管理员账号' });
   if (req.body.role && ['super_admin', 'admin', 'user'].includes(req.body.role)) {
     // 禁止任何人修改自己的角色
     if (user.id === req.user.id) return res.status(400).json({ error: '不能修改自己的角色' });
@@ -1908,9 +2013,19 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (r
   }
   if (typeof req.body.disabled === 'boolean') {
     if (user.id === req.user.id && req.body.disabled) return res.status(400).json({ error: '不能禁用当前登录管理员' });
+    if (user.role !== 'user' && req.user.role !== 'super_admin') return res.status(403).json({ error: '只有超级管理员可以禁用管理员' });
+    if (req.body.disabled && isInitialAdmin(user)) return res.status(400).json({ error: '不能禁用初始管理员账号' });
+    if (req.body.disabled && user.role === 'super_admin') {
+      const otherActive = state.users.filter((u) => u.role === 'super_admin' && !u.disabled && u.id !== user.id);
+      if (otherActive.length === 0) return res.status(400).json({ error: '不能禁用最后一个活跃的超级管理员' });
+    }
     user.disabled = req.body.disabled;
+    if (req.body.disabled) {
+      state.sessions = state.sessions.filter((s) => s.userId !== user.id);
+    }
   }
   if (req.body.password !== undefined) {
+    if (req.user.role !== 'super_admin' && user.id !== req.user.id) return res.status(403).json({ error: '只有超级管理员可以重置他人密码' });
     const password = String(req.body.password || '');
     if (!validatePassword(password)) return res.status(400).json({ error: '密码长度需为 8-128 位' });
     user.passwordHash = await hashPassword(password);
@@ -1939,7 +2054,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (r
   res.json({ user: publicUser(user), csrfToken: req.session?.csrfToken });
 }));
 
-app.delete('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (req, res) => {
+app.delete('/api/admin/users/:id', requireAuth, requireSuperAdmin, asyncRoute(async (req, res) => {
   const user = state.users.find((item) => item.id === req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   if (user.id === req.user.id) return res.status(400).json({ error: '不能删除当前登录管理员' });
@@ -1949,6 +2064,7 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (
   state.users = state.users.filter((item) => item.id !== user.id);
   state.sessions = state.sessions.filter((session) => session.userId !== user.id);
   state.files = state.files.filter((file) => file.ownerId !== user.id);
+  for (const file of ownedFiles) revokePublicDownloadTokensForFile(file.id);
   await Promise.all(ownedFiles.map((file) => fsp.rm(filePathFor(file), { force: true }).catch(() => {})));
   addLog('admin.user_deleted', req, { username: user.username, removedFiles: ownedFiles.length });
   await saveState();
@@ -2139,7 +2255,7 @@ app.post('/api/admin/reset', requireAuth, requireSuperAdmin, asyncRoute(async (r
   res.json({ ok: true });
 }));
 
-app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => withUploadLock(async () => {
+app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => {
   const uploaded = Array.isArray(req.files) ? req.files : [];
   if (uploaded.length === 0) return res.status(400).json({ error: '请选择要上传的文件' });
 
@@ -2163,7 +2279,7 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
   if (retentionHours === 0 && req.user.role === 'user') retentionHours = getRetentionHours();
   const maxDownloads = validateMaxDownloads(req.body.maxDownloads);
   const now = nowIso();
-  const code = makeCode();
+  let code = '';
   const shouldZipBatch = uploaded.length > 1;
   const quota = getStorageQuotaMb();
   if (quota > 0) {
@@ -2200,7 +2316,7 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
         id: randomId(),
         ownerId: req.user.id,
         code,
-        originalName: zipDisplayName(uploaded, code),
+        originalName: '',
         storedName,
         storageDir,
         size: zipSize,
@@ -2215,7 +2331,6 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
         downloadCount: 0,
         downloadLog: []
       };
-      state.files.push(record);
       created.push(record);
       await Promise.all(uploaded.map((file) => fsp.rm(file.path, { force: true }).catch(() => {})));
     } else {
@@ -2247,18 +2362,41 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
           downloadCount: 0,
           downloadLog: []
         };
-        state.files.push(record);
         created.push(record);
       }
     }
-    addLog('files.uploaded', req, {
-      count: created.length,
-      bytes: created.reduce((sum, file) => sum + file.size, 0),
-      batchCode: code,
-      sourceCount: uploaded.length,
-      zipped: shouldZipBatch
+    let quotaError = '';
+    await withUploadLock(async () => {
+      if (quota > 0) {
+        const currentBytes = getCurrentStorageBytes();
+        const incomingBytes = created.reduce((sum, file) => sum + file.size, 0);
+        const quotaBytes = quota * 1024 * 1024;
+        if (currentBytes + incomingBytes > quotaBytes) {
+          const usedMb = Math.round(currentBytes / 1024 / 1024);
+          quotaError = `存储空间不足，已用 ${usedMb} MB / ${quota} MB，无法保存本次上传`;
+          return;
+        }
+      }
+      code = makeCode();
+      for (const file of created) {
+        file.code = code;
+        if (file.bundle) file.originalName = zipDisplayName(uploaded, code);
+        attachShareCredential(file);
+      }
+      state.files.push(...created);
+      addLog('files.uploaded', req, {
+        count: created.length,
+        bytes: created.reduce((sum, file) => sum + file.size, 0),
+        batchCode: code,
+        sourceCount: uploaded.length,
+        zipped: shouldZipBatch
+      });
+      await saveState();
     });
-    await saveState();
+    if (quotaError) {
+      await Promise.all(moved.map((file) => fsp.rm(filePathFor(file), { force: true }).catch(() => {})));
+      return res.status(507).json({ error: quotaError });
+    }
   } catch (error) {
     await Promise.all(uploaded.map((file) => fsp.rm(file.path, { force: true }).catch(() => {})));
     await Promise.all(moved.map((file) => fsp.rm(filePathFor(file), { force: true }).catch(() => {})));
@@ -2280,10 +2418,10 @@ app.post('/api/files', requireAuth, uploadFiles, asyncRoute(async (req, res) => 
       downloadCount: downloadCountFor(file),
       maxDownloads: normalizeMaxDownloads(file.maxDownloads),
       remainingDownloads: downloadsRemaining(file),
-      shareUrl: shareUrlFor(file.code, req)
+      shareUrl: shareUrlFor(file, req)
     }))
   });
-})));
+}));
 
 app.get('/api/files', requireAuth, asyncRoute(async (req, res) => {
   await cleanupExpired();
@@ -2301,7 +2439,7 @@ app.get('/api/files', requireAuth, asyncRoute(async (req, res) => {
       downloadCount: downloadCountFor(file),
       maxDownloads: normalizeMaxDownloads(file.maxDownloads),
       remainingDownloads: downloadsRemaining(file),
-      shareUrl: shareUrlFor(file.code, req)
+      shareUrl: shareUrlFor(file, req)
     }));
   res.json({ files });
 }));
@@ -2345,7 +2483,7 @@ app.get('/api/admin/users/:userId/files', requireAuth, requireSuperAdmin, asyncR
       downloadCount: downloadCountFor(file),
       maxDownloads: normalizeMaxDownloads(file.maxDownloads),
       remainingDownloads: downloadsRemaining(file),
-      shareUrl: shareUrlFor(file.code, req),
+      shareUrl: shareUrlFor(file, req),
       ownerId: file.ownerId
     }));
   res.json({ user: { id: targetUser.id, username: targetUser.username, role: targetUser.role }, files });
@@ -2354,7 +2492,7 @@ app.get('/api/admin/users/:userId/files', requireAuth, requireSuperAdmin, asyncR
 app.get('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   const file = state.files.find((item) => item.id === req.params.id);
   if (!file) return res.status(404).json({ error: '文件不存在' });
-  if (file.ownerId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权查看' });
+  if (file.ownerId !== req.user.id && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权查看' });
   res.json({
     file: {
       id: file.id,
@@ -2375,12 +2513,13 @@ app.get('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
 app.patch('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   const file = state.files.find((item) => item.id === req.params.id);
   if (!file) return res.status(404).json({ error: '文件不存在' });
-  if (file.ownerId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权修改该文件' });
+  if (file.ownerId !== req.user.id && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权修改该文件' });
   if (req.body.retentionHours !== undefined) {
     let retentionHours = parseRetentionHours(req.body.retentionHours);
     if (retentionHours === 0 && req.user.role === 'user') retentionHours = getRetentionHours();
     file.retentionHours = retentionHours;
-    file.expiresAt = retentionHours === 0 ? null : addHours(nowIso(), retentionHours);
+    const baseTime = file.createdAt || nowIso();
+    file.expiresAt = retentionHours === 0 ? null : addHours(baseTime, retentionHours);
   }
   if (req.body.maxDownloads !== undefined) {
     file.maxDownloads = validateMaxDownloads(req.body.maxDownloads);
@@ -2394,21 +2533,29 @@ app.patch('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   res.json({ file: publicFilePayload(file, req) });
 }));
 
-app.get('/api/files/code/:code', requireAuth, asyncRoute(async (req, res) => {
-  await cleanupExpired();
-  const code = normalizeReceiveCode(req.params.code);
-  if (!validateReceiveCode(code)) return res.status(400).json({ error: '接收码格式不正确' });
-  const file = state.files.find((item) => item.code === code && !isExpiredFile(item));
-  if (!file) return res.status(404).json({ error: '取件码不存在或文件已过期' });
-  if (!hasDownloadsRemaining(file)) return res.status(410).json({ error: '文件下载次数已用完' });
+app.post('/api/files/:id/share/rotate', requireAuth, asyncRoute(async (req, res) => {
+  const file = state.files.find((item) => item.id === req.params.id);
+  if (!file) return res.status(404).json({ error: '文件不存在' });
+  if (file.ownerId !== req.user.id && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权修改该文件' });
+  await withUploadLock(async () => {
+    file.code = makeCode();
+    attachShareCredential(file);
+    revokePublicDownloadTokensForFile(file.id);
+    addLog('files.share_rotated', req, { fileId: file.id, code: file.code });
+    await saveState();
+  });
   res.json({ file: publicFilePayload(file, req) });
 }));
 
-app.get('/api/public/files/code/:code', publicCodeLimiter, asyncRoute(async (req, res) => {
+app.get('/api/files/code/:code', requireAuth, asyncRoute(async (req, res) => {
+  res.status(410).json({ error: '请在页面中输入接收码' });
+}));
+
+app.post('/api/public/files/lookup', publicCodeLimiter, asyncRoute(async (req, res) => {
   await cleanupExpired();
   const ip = clientIp(req);
   if (checkPublicCodeFailures(ip)) return res.status(429).json({ error: '接收码尝试过于频繁，请稍后再试' });
-  const code = normalizeReceiveCode(req.params.code);
+  const code = normalizeReceiveCode(req.body.code);
   if (!validateReceiveCode(code)) {
     recordPublicCodeFailure(ip);
     return res.status(400).json({ error: '接收码格式不正确' });
@@ -2419,8 +2566,22 @@ app.get('/api/public/files/code/:code', publicCodeLimiter, asyncRoute(async (req
     return res.status(404).json({ error: '取件码不存在或文件已过期' });
   }
   if (!hasDownloadsRemaining(file)) return res.status(410).json({ error: '文件下载次数已用完' });
+  if (isFileOwnerDisabled(file)) return res.status(403).json({ error: '文件不可用' });
   clearPublicCodeFailures(ip);
-  res.json({ file: publicFilePayload(file, req) });
+  res.json(publicFileLookupPayload(file, req));
+}));
+
+app.get('/api/public/share/:token', publicCodeLimiter, asyncRoute(async (req, res) => {
+  await cleanupExpired();
+  const file = findFileByShareToken(req.params.token);
+  if (!file) return res.status(404).json({ error: '分享链接不存在或文件已过期' });
+  if (!hasDownloadsRemaining(file)) return res.status(410).json({ error: '文件下载次数已用完' });
+  if (isFileOwnerDisabled(file)) return res.status(403).json({ error: '文件不可用' });
+  res.json(publicFileLookupPayload(file, req));
+}));
+
+app.get('/api/public/files/code/:code', publicCodeLimiter, asyncRoute(async (req, res) => {
+  res.status(410).json({ error: '请在页面中输入接收码' });
 }));
 
 app.get('/api/files/:id/download', requireAuth, asyncRoute(async (req, res) => {
@@ -2430,48 +2591,46 @@ app.get('/api/files/:id/download', requireAuth, asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/files/code/:code/download', requireAuth, asyncRoute(async (req, res) => {
-  await cleanupExpired();
-  const code = normalizeReceiveCode(req.params.code);
-  if (!validateReceiveCode(code)) return res.status(400).json({ error: '接收码格式不正确' });
-  const file = state.files.find((item) => item.code === code && !isExpiredFile(item));
-  await handleFileDownload(file, req, res, { byCode: true, isPublic: false });
+  res.status(410).json({ error: '请在页面中输入接收码后下载' });
 }));
 
 app.get('/api/public/files/code/:code/download', publicDownloadLimiter, asyncRoute(async (req, res) => {
+  res.status(410).json({ error: '请在页面中输入接收码后下载' });
+}));
+
+app.get('/api/public/download/:token', publicDownloadLimiter, asyncRoute(async (req, res) => {
   await cleanupExpired();
-  const ip = clientIp(req);
-  if (checkPublicCodeFailures(ip)) return res.status(429).json({ error: '接收码尝试过于频繁，请稍后再试' });
-  const code = normalizeReceiveCode(req.params.code);
-  if (!validateReceiveCode(code)) {
-    recordPublicCodeFailure(ip);
-    return res.status(400).json({ error: '接收码格式不正确' });
-  }
-  const file = state.files.find((item) => item.code === code && !isExpiredFile(item));
-  if (!file) {
-    recordPublicCodeFailure(ip);
-    return res.status(404).json({ error: '取件码不存在或文件已过期' });
-  }
-  clearPublicCodeFailures(ip);
-  await handleFileDownload(file, req, res, { byCode: true, isPublic: true });
+  const file = takePublicDownloadFile(req.params.token);
+  if (file && isFileOwnerDisabled(file)) return res.status(403).json({ error: '文件不可用' });
+  await handleFileDownload(file, req, res, { byCode: false, isPublic: true });
 }));
 
 app.delete('/api/files/:id', requireAuth, asyncRoute(async (req, res) => {
   const file = state.files.find((item) => item.id === req.params.id);
   if (!file) return res.status(404).json({ error: '文件不存在' });
-  if (file.ownerId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权删除该文件' });
+  if (file.ownerId !== req.user.id && req.user.role !== 'super_admin') return res.status(403).json({ error: '无权删除该文件' });
   state.files = state.files.filter((item) => item.id !== file.id);
+  revokePublicDownloadTokensForFile(file.id);
   await fsp.rm(filePathFor(file), { force: true }).catch(() => {});
   addLog('files.deleted', req, { fileId: file.id, name: file.originalName });
   await saveState();
   res.json({ ok: true });
 }));
 
-app.get(['/app', '/app/', '/app/send', '/app/receive', '/app/files'], (req, res) => {
+app.get(['/app', '/app/', '/app/send', '/app/receive', '/app/files', '/app/account'], (req, res) => {
   sendPublicHtml(res, 'app.html');
 });
 
 app.get('/login', (req, res) => {
   sendPublicHtml(res, 'login.html');
+});
+
+app.get(['/receive', '/receive/'], (req, res) => {
+  sendPublicHtml(res, 'receive.html');
+});
+
+app.get('/s/:token', (req, res) => {
+  sendPublicHtml(res, 'receive.html');
 });
 
 app.get('/r/:code', (req, res) => {

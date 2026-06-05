@@ -50,6 +50,8 @@ const elements = {
   accountAvatar: $('#accountAvatar'),
   accountUsername: $('#accountUsername'),
   accountRole: $('#accountRole'),
+  currentDisplayName: $('#currentDisplayName'),
+  changeDisplayNameBtn: $('#changeDisplayNameBtn'),
   currentEmail: $('#currentEmail'),
   changeEmailBtn: $('#changeEmailBtn'),
   emailChangeForm: $('#emailChangeForm'),
@@ -108,6 +110,7 @@ function formatEta(seconds) {
 function modeFromPath() {
   if (window.location.pathname.endsWith('/receive')) return 'receive';
   if (window.location.pathname.endsWith('/files')) return 'files';
+  if (window.location.pathname.endsWith('/account')) return 'account';
   return 'send';
 }
 
@@ -248,6 +251,22 @@ function retentionText(file) {
   return h === 0 ? '永久保留' : `${h}小时后过期`;
 }
 
+function shareUrlForFile(file) {
+  return file.shareUrl || '';
+}
+
+function shareLineHtml(shareUrl) {
+  return shareUrl
+    ? `<div class="meta share-line">${escapeHtml(shareUrl)}</div>`
+    : '<div class="meta share-line">旧文件需要在设置中重新生成分享链接</div>';
+}
+
+function shareCopyButton(shareUrl) {
+  return shareUrl
+    ? `<button class="small-btn" data-copy="${escapeHtml(shareUrl)}" type="button">复制链接</button>`
+    : '<button class="small-btn" type="button" disabled>未生成链接</button>';
+}
+
 elements.uploadBtn.addEventListener('click', async () => {
   if (state.selectedFiles.length === 0) return;
   const maxFiles = Math.max(1, Number(state.limits.maxFilesPerUpload ?? 10));
@@ -374,18 +393,18 @@ function renderUploadResults(files = state.recentUploads) {
   }
   const visible = state.uploadResultsExpanded || !hasMore ? state.recentUploads : state.recentUploads.slice(0, 2);
   elements.uploadResults.innerHTML = visible.map((file) => {
-    const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
+    const shareUrl = shareUrlForFile(file);
     return `
       <div class="item">
         <div>
           <h3>${escapeHtml(file.name)}</h3>
           <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText(file))} · ${escapeHtml(downloadLimitText(file))}</div>
-          <div class="meta share-line">${escapeHtml(shareUrl)}</div>
+          ${shareLineHtml(shareUrl)}
         </div>
         <div class="actions">
           <button class="small-btn" data-copy="${escapeHtml(file.code)}" type="button">复制接收码</button>
-          <button class="small-btn" data-copy="${escapeHtml(shareUrl)}" type="button">复制链接</button>
-          <a class="small-btn" href="/api/public/files/code/${encodeURIComponent(file.code)}/download">下载</a>
+          ${shareCopyButton(shareUrl)}
+          <a class="small-btn" href="/api/files/${encodeURIComponent(file.id)}/download">下载</a>
           <button class="small-btn danger" data-delete-upload="${escapeHtml(file.id)}" type="button">删除</button>
         </div>
       </div>
@@ -433,7 +452,10 @@ elements.codeForm.addEventListener('submit', async (event) => {
     return;
   }
   try {
-    const result = await api(`/api/public/files/code/${encodeURIComponent(code)}`);
+    const result = await api('/api/public/files/lookup', {
+      method: 'POST',
+      body: JSON.stringify({ code })
+    });
     const file = result.file;
     elements.codeResult.innerHTML = `
       <div class="item">
@@ -442,7 +464,7 @@ elements.codeForm.addEventListener('submit', async (event) => {
           <div class="meta">发送者 ${escapeHtml(file.owner)} · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText(file))} · ${escapeHtml(downloadLimitText(file))}</div>
         </div>
         <div class="actions">
-          <a class="small-btn" href="/api/public/files/code/${encodeURIComponent(file.code)}/download">下载</a>
+          <a class="small-btn" href="/api/public/download/${encodeURIComponent(result.downloadToken)}">下载</a>
         </div>
       </div>
     `;
@@ -460,7 +482,7 @@ async function loadFiles() {
       return;
     }
     elements.fileList.innerHTML = result.files.map((file) => {
-      const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
+      const shareUrl = shareUrlForFile(file);
       const retention = file.retentionHours ?? 48;
       const retentionText = retention === 0 ? '永久保留' : `${retention}小时后过期`;
       return `
@@ -468,12 +490,12 @@ async function loadFiles() {
           <div>
             <h3>${escapeHtml(file.name)}</h3>
             <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText)} · <span class="dl-count">${escapeHtml(downloadLimitText(file))}</span></div>
-            <div class="meta share-line">${escapeHtml(shareUrl)}</div>
+            ${shareLineHtml(shareUrl)}
           </div>
           <div class="actions">
             <button class="small-btn" data-copy="${escapeHtml(file.code)}" type="button">复制接收码</button>
-            <button class="small-btn" data-copy="${escapeHtml(shareUrl)}" type="button">复制链接</button>
-            <a class="small-btn" href="/api/public/files/code/${encodeURIComponent(file.code)}/download">下载</a>
+            ${shareCopyButton(shareUrl)}
+            <a class="small-btn" href="/api/files/${encodeURIComponent(file.id)}/download">下载</a>
             <button class="small-btn" data-file-manage="${escapeHtml(file.id)}" type="button">设置</button>
             <button class="small-btn" data-file-detail="${escapeHtml(file.id)}" type="button">详情</button>
             <button class="small-btn danger" data-delete-file="${escapeHtml(file.id)}" type="button">删除</button>
@@ -534,7 +556,7 @@ async function loadUserFiles(userId, username) {
       return;
     }
     elements.userFilesList.innerHTML = result.files.map((file) => {
-      const shareUrl = file.shareUrl || `${state.publicBaseUrl}/r/${encodeURIComponent(file.code)}`;
+      const shareUrl = shareUrlForFile(file);
       const retention = file.retentionHours ?? 48;
       const retentionText = retention === 0 ? '永久保留' : `${retention}小时后过期`;
       return `
@@ -542,12 +564,12 @@ async function loadUserFiles(userId, username) {
           <div>
             <h3>${escapeHtml(file.name)}</h3>
             <div class="meta">接收码 <span class="badge">${escapeHtml(file.code)}</span> · ${escapeHtml(formatSize(file.size))} · ${escapeHtml(retentionText)} · <span class="dl-count">${escapeHtml(downloadLimitText(file))}</span></div>
-            <div class="meta share-line">${escapeHtml(shareUrl)}</div>
+            ${shareLineHtml(shareUrl)}
           </div>
           <div class="actions">
             <button class="small-btn" data-copy="${escapeHtml(file.code)}" type="button">复制接收码</button>
-            <button class="small-btn" data-copy="${escapeHtml(shareUrl)}" type="button">复制链接</button>
-            <a class="small-btn" href="/api/public/files/code/${encodeURIComponent(file.code)}/download">下载</a>
+            ${shareCopyButton(shareUrl)}
+            <a class="small-btn" href="/api/files/${encodeURIComponent(file.id)}/download">下载</a>
             <button class="small-btn danger" data-delete-file="${escapeHtml(file.id)}" type="button">删除</button>
           </div>
         </div>
@@ -629,6 +651,13 @@ function showFileManage(file) {
           <input name="maxDownloads" type="number" min="0" max="100000" step="1" value="${Number(file.maxDownloads || 0)}" placeholder="0 表示不限">
         </label>
         <p class="form-hint">选择「永久保留」则文件不会自动过期。保存后有效期会从当前时间重新计算，下载次数填 0 表示不限。</p>
+        <div class="account-section">
+          <div>
+            <h4>分享凭证</h4>
+            <p class="meta">重新生成后，旧取件码和旧分享链接会立即失效。</p>
+          </div>
+          <button class="small-btn danger" data-rotate-share="${escapeHtml(file.id)}" type="button">重新生成</button>
+        </div>
         <div class="actions left">
           <button class="primary" type="submit">保存</button>
           <button class="small-btn modal-close" type="button">取消</button>
@@ -665,6 +694,19 @@ function showFileManage(file) {
       toast('文件设置已更新');
       overlay.remove();
       loadFiles();
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+  overlay.querySelector('[data-rotate-share]')?.addEventListener('click', async () => {
+    if (!confirm('重新生成后，旧取件码和旧分享链接将立即失效。继续吗？')) return;
+    try {
+      await api(`/api/files/${file.id}/share/rotate`, { method: 'POST' });
+      toast('取件码和分享链接已重新生成');
+      overlay.remove();
+      loadFiles();
+      loadRecentUploads();
+      if (currentViewingUserId) loadUserFiles(currentViewingUserId, currentViewingUsername);
     } catch (error) {
       toast(error.message);
     }
@@ -779,7 +821,29 @@ function renderAccount() {
   elements.accountAvatar.textContent = initials(user.username);
   elements.accountUsername.textContent = user.username;
   elements.accountRole.textContent = roleLabel(user.role);
+  if (elements.currentDisplayName) {
+    elements.currentDisplayName.textContent = user.displayName ? user.displayName : '未设置，分享时显示登录名';
+  }
   elements.currentEmail.textContent = user.email || '未绑定邮箱';
+}
+
+if (elements.changeDisplayNameBtn) {
+  elements.changeDisplayNameBtn.addEventListener('click', async () => {
+    const current = state.user.displayName || '';
+    const displayName = prompt('设置分享别称，留空则清除', current);
+    if (displayName === null) return;
+    try {
+      const result = await api('/api/account/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ displayName })
+      });
+      state.user = result.user;
+      renderAccount();
+      toast(state.user.displayName ? '分享别称已更新' : '分享别称已清除');
+    } catch (error) {
+      toast(error.message);
+    }
+  });
 }
 
 async function loadAccountCaptcha() {

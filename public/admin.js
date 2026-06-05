@@ -169,6 +169,9 @@ async function loadUsers() {
     const result = await api('/api/admin/users');
     const isSuper = state.user.role === 'super_admin';
     elements.userList.innerHTML = result.users.map((user) => {
+      const canEditTarget = isSuper || user.role === 'user' || user.id === state.user.id;
+      const canToggle = isSuper || user.role === 'user';
+      const canReset = isSuper || user.id === state.user.id;
       const roleOptions = isSuper ? `
             <select class="small-btn" data-change-role="${escapeHtml(user.id)}">
               <option value="user" ${user.role === 'user' ? 'selected' : ''}>用户</option>
@@ -183,10 +186,10 @@ async function loadUsers() {
         </div>
         <div class="actions">
           ${roleOptions}
-          <button class="small-btn" data-toggle-user="${escapeHtml(user.id)}" data-disabled="${escapeHtml(user.disabled)}" type="button">${user.disabled ? '启用' : '禁用'}</button>
-          <button class="small-btn" data-email-user="${escapeHtml(user.id)}" data-email="${escapeHtml(user.email || '')}" type="button">设置邮箱</button>
-          <button class="small-btn" data-reset-user="${escapeHtml(user.id)}" type="button">重置密码</button>
-          <button class="small-btn danger" data-delete-user="${escapeHtml(user.id)}" type="button">删除</button>
+          ${canToggle ? `<button class="small-btn" data-toggle-user="${escapeHtml(user.id)}" data-disabled="${escapeHtml(user.disabled)}" type="button">${user.disabled ? '启用' : '禁用'}</button>` : ''}
+          ${canEditTarget ? `<button class="small-btn" data-email-user="${escapeHtml(user.id)}" data-email="${escapeHtml(user.email || '')}" type="button">设置邮箱</button>` : ''}
+          ${canReset ? `<button class="small-btn" data-reset-user="${escapeHtml(user.id)}" type="button">重置密码</button>` : ''}
+          ${isSuper ? `<button class="small-btn danger" data-delete-user="${escapeHtml(user.id)}" type="button">删除</button>` : ''}
         </div>
       </div>`;
     }).join('');

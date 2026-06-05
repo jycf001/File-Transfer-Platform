@@ -19,7 +19,7 @@
           <button class="nav-btn active" data-view="send" data-route="/app/send" type="button">发送</button>
           <button class="nav-btn" data-view="receive" data-route="/app/receive" type="button">接收</button>
           <button class="nav-btn" data-view="files" data-route="/app/files" type="button">我的文件</button>
-          <button class="nav-btn" data-view="account" type="button">账号</button>
+          <button class="nav-btn" data-view="account" data-route="/app/account" type="button">账号</button>
           <a class="nav-link admin-only" href="/admin" hidden>设置</a>
         </div>
         <div class="nav-account">
@@ -155,6 +155,13 @@
                 <h3 id="accountUsername"></h3>
                 <p class="meta" id="accountRole"></p>
               </div>
+            </div>
+            <div class="account-section account-display-row">
+              <div>
+                <h4>分享别称</h4>
+                <p class="meta" id="currentDisplayName">未设置，分享时显示登录名</p>
+              </div>
+              <button class="small-btn" id="changeDisplayNameBtn" type="button">设置别称</button>
             </div>
             <div class="account-section account-email-row">
               <div>

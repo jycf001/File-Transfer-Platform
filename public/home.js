@@ -32,7 +32,10 @@ function goToReceive(code) {
     codeInput.focus();
     return;
   }
-  window.location.href = `/r/${encodeURIComponent(normalized)}`;
+  try {
+    sessionStorage.setItem('jiahaodrop_receive_code', normalized);
+  } catch {}
+  window.location.href = '/receive';
 }
 
 if (codeInput) {

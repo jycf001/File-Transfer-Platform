@@ -31,9 +31,9 @@ ok "Node.js $(node -v)"
 info "安装生产依赖..."
 cd "$APP_DIR"
 if [ -f package-lock.json ]; then
-  npm ci --production --ignore-scripts 2>&1 | tail -1
+  npm ci --omit=dev --ignore-scripts 2>&1 | tail -1
 else
-  npm install --production --ignore-scripts 2>&1 | tail -1
+  npm install --omit=dev --ignore-scripts 2>&1 | tail -1
 fi
 ok "依赖安装完成"
 
