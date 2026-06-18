@@ -36,7 +36,7 @@ let loginMethod = 'password';
 
 function safeHidden(el, val) { if (el) el.hidden = val; }
 function safeText(el, val) { if (el) el.textContent = val; }
-function safeHtml(el, val) { if (el) el.innerHTML = val; }
+function setInnerSanitized(el, val) { if (el) el.innerHTML = val; }
 function setRequired(el, val) { if (el) el.required = val; }
 
 function isCaptchaNeeded() {
@@ -140,7 +140,7 @@ async function loadCaptcha() {
   try {
     const result = await api('/api/captcha');
     captchaId = result.captcha.id;
-    safeHtml(elements.captchaQuestion, sanitizeSvg(result.captcha.svg));
+    setInnerSanitized(elements.captchaQuestion, sanitizeSvg(result.captcha.svg));
     if (elements.captchaInput) elements.captchaInput.value = '';
   } catch (error) {
     console.error('[loadCaptcha]', error);

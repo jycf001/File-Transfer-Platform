@@ -604,7 +604,7 @@ document.addEventListener('click', async (event) => {
 
   const resetUser = event.target.closest('[data-reset-user]');
   if (resetUser) {
-    const password = prompt('请输入新密码，至少 8 位');
+    const password = prompt('请输入新密码（10-128位，须含大小写字母和数字）');
     if (!password) return;
     try {
       await api(`/api/admin/users/${resetUser.dataset.resetUser}`, {

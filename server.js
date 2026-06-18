@@ -88,9 +88,9 @@ if (process.argv.includes('--init')) {
     rl.close();
     process.exit(1);
   }
-  const password = (await ask('管理员密码 (至少8位): ')).trim();
-  if (password.length < 8 || password.length > 128) {
-    console.error('[init] 密码长度需为 8-128 位');
+  const password = (await ask('管理员密码 (10-128位，须含大小写字母和数字): ')).trim();
+  if (!validatePassword(password)) {
+    console.error('[init] 密码需为 10-128 位，且包含大写字母、小写字母和数字');
     rl.close();
     process.exit(1);
   }
@@ -139,8 +139,6 @@ const emailCodeStore = new Map();
 const publicDownloadStore = new Map();
 let cachedMailer = null;
 let cachedMailerKey = '';
-const bruteForceStore = new Map(); // ip -> { count, firstAt, blockedUntil }
-const publicCodeFailureStore = new Map(); // ip -> { count, firstAt, blockedUntil }
 let uploadSerial = Promise.resolve();
 const downloadLocks = new Map(); // fileId -> Promise chain
 
@@ -163,16 +161,15 @@ function withDownloadLock(fileId, task) {
 
 function checkBruteForce(ip) {
   const now = Date.now();
-  const record = bruteForceStore.get(ip);
+  const record = state.loginFailures[ip];
   if (!record) return false;
   if (record.blockedUntil && now > record.blockedUntil) {
-    bruteForceStore.set(ip, { count: 0, firstAt: now, blockedUntil: null, lockCount: record.lockCount || 0 });
+    state.loginFailures[ip] = { count: 0, firstAt: now, blockedUntil: null, lockCount: record.lockCount || 0 };
     return false;
   }
   if (record.blockedUntil && now <= record.blockedUntil) return true;
-  // 5 分钟窗口内累计失败
   if (now - record.firstAt > 5 * 60 * 1000) {
-    bruteForceStore.delete(ip);
+    delete state.loginFailures[ip];
     return false;
   }
   return false;
@@ -180,9 +177,9 @@ function checkBruteForce(ip) {
 
 function recordLoginFailure(ip) {
   const now = Date.now();
-  const record = bruteForceStore.get(ip);
+  const record = state.loginFailures[ip];
   if (!record || now - record.firstAt > 5 * 60 * 1000) {
-    bruteForceStore.set(ip, { count: 1, firstAt: now, blockedUntil: null, lockCount: 0 });
+    state.loginFailures[ip] = { count: 1, firstAt: now, blockedUntil: null, lockCount: 0 };
     return;
   }
   record.count += 1;
@@ -190,20 +187,19 @@ function recordLoginFailure(ip) {
     record.lockCount = (record.lockCount || 0) + 1;
     const lockMinutes = record.lockCount >= 3 ? 15 : record.lockCount >= 2 ? 5 : 1;
     record.blockedUntil = now + lockMinutes * 60 * 1000;
-    // 不重置 count/firstAt，锁定解除后仍在同一窗口内累计
   }
 }
 
 function clearLoginAttempts(ip) {
-  bruteForceStore.delete(ip);
+  delete state.loginFailures[ip];
 }
 
 function checkPublicCodeFailures(ip) {
   const now = Date.now();
-  const record = publicCodeFailureStore.get(ip);
+  const record = state.publicCodeFailures[ip];
   if (!record) return false;
   if (record.blockedUntil && now > record.blockedUntil) {
-    publicCodeFailureStore.delete(ip);
+    delete state.publicCodeFailures[ip];
     return false;
   }
   return Boolean(record.blockedUntil && now <= record.blockedUntil);
@@ -211,9 +207,9 @@ function checkPublicCodeFailures(ip) {
 
 function recordPublicCodeFailure(ip) {
   const now = Date.now();
-  const record = publicCodeFailureStore.get(ip);
+  const record = state.publicCodeFailures[ip];
   if (!record || now - record.firstAt > 10 * 60 * 1000) {
-    publicCodeFailureStore.set(ip, { count: 1, firstAt: now, blockedUntil: null });
+    state.publicCodeFailures[ip] = { count: 1, firstAt: now, blockedUntil: null };
     return;
   }
   record.count += 1;
@@ -221,7 +217,7 @@ function recordPublicCodeFailure(ip) {
 }
 
 function clearPublicCodeFailures(ip) {
-  publicCodeFailureStore.delete(ip);
+  delete state.publicCodeFailures[ip];
 }
 
 const defaultSettings = {
@@ -255,7 +251,9 @@ const state = {
   sessions: [],
   logs: [],
   emailChallenges: [],
-  settings: structuredClone(defaultSettings)
+  settings: structuredClone(defaultSettings),
+  loginFailures: {},
+  publicCodeFailures: {}
 };
 
 function cleanupTransientChallenges() {
@@ -298,6 +296,8 @@ async function loadState() {
     state.logs = Array.isArray(parsed.logs) ? parsed.logs.slice(-maxLogEntries) : [];
     state.emailChallenges = Array.isArray(parsed.emailChallenges) ? parsed.emailChallenges : [];
     state.settings = mergeSettings(parsed.settings);
+    state.loginFailures = parsed.loginFailures && typeof parsed.loginFailures === 'object' && !Array.isArray(parsed.loginFailures) ? parsed.loginFailures : {};
+    state.publicCodeFailures = parsed.publicCodeFailures && typeof parsed.publicCodeFailures === 'object' && !Array.isArray(parsed.publicCodeFailures) ? parsed.publicCodeFailures : {};
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
     await saveState();
@@ -501,8 +501,9 @@ function isSessionExpired(session, nowMs = Date.now()) {
 }
 
 function setSessionCookie(res, token) {
+  const name = config.cookieSecure ? `__Host-${sessionCookie}` : sessionCookie;
   const attrs = [
-    `${encodeURIComponent(sessionCookie)}=${encodeURIComponent(token)}`,
+    `${encodeURIComponent(name)}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Strict'
@@ -512,8 +513,9 @@ function setSessionCookie(res, token) {
 }
 
 function clearSessionCookie(res) {
+  const name = config.cookieSecure ? `__Host-${sessionCookie}` : sessionCookie;
   const attrs = [
-    `${encodeURIComponent(sessionCookie)}=`,
+    `${encodeURIComponent(name)}=`,
     'Path=/',
     'HttpOnly',
     'SameSite=Strict',
@@ -532,7 +534,11 @@ function validateUsername(username) {
 }
 
 function validatePassword(password) {
-  return typeof password === 'string' && password.length >= 8 && password.length <= 128;
+  if (typeof password !== 'string' || password.length < 10 || password.length > 128) return false;
+  if (!/[a-z]/.test(password)) return false;
+  if (!/[A-Z]/.test(password)) return false;
+  if (!/[0-9]/.test(password)) return false;
+  return true;
 }
 
 function normalizeEmail(email) {
@@ -1057,8 +1063,8 @@ async function createZipFromUploadedFiles(uploaded, targetPath) {
       Promise.resolve(archive.finalize()).catch(reject);
     });
   } catch (err) {
-    const details = err.message || String(err);
-    throw new Error(`文件打包失败: ${details}`);
+    console.error('[zip]', err);
+    throw new Error('文件打包失败，请重试');
   }
   const stat = await fsp.stat(targetPath);
   return stat.size;
@@ -1127,7 +1133,7 @@ function validateStorageDir(value) {
   // 限制 storageDir 必须在专用数据目录内，防止误设到项目目录、用户目录等宽泛路径
   const dataRoot = path.resolve(config.dataDir) + path.sep;
   const normalized = path.resolve(target) + path.sep;
-  if (!normalized.startsWith(dataRoot)) throw new Error('文件存放目录必须在数据目录内: ' + dataRoot);
+  if (!normalized.startsWith(dataRoot)) throw new Error('文件存放目录必须在数据目录内');
   return target;
 }
 
@@ -1359,13 +1365,13 @@ async function cleanupExpired() {
 
   // 清理过期的暴力破解和验证码失败记录
   const now = Date.now();
-  for (const [ip, record] of bruteForceStore) {
-    if (record.blockedUntil && now > record.blockedUntil) bruteForceStore.delete(ip);
-    else if (!record.blockedUntil && now - record.firstAt > 5 * 60 * 1000) bruteForceStore.delete(ip);
+  for (const [ip, record] of Object.entries(state.loginFailures)) {
+    if (record.blockedUntil && now > record.blockedUntil) delete state.loginFailures[ip];
+    else if (!record.blockedUntil && now - record.firstAt > 5 * 60 * 1000) delete state.loginFailures[ip];
   }
-  for (const [ip, record] of publicCodeFailureStore) {
-    if (record.blockedUntil && now > record.blockedUntil) publicCodeFailureStore.delete(ip);
-    else if (!record.blockedUntil && now - record.firstAt > 10 * 60 * 1000) publicCodeFailureStore.delete(ip);
+  for (const [ip, record] of Object.entries(state.publicCodeFailures)) {
+    if (record.blockedUntil && now > record.blockedUntil) delete state.publicCodeFailures[ip];
+    else if (!record.blockedUntil && now - record.firstAt > 10 * 60 * 1000) delete state.publicCodeFailures[ip];
   }
 
   if (toRemove.length) addLog('files.cleanup_expired', null, { removed: toRemove.length });
@@ -1429,7 +1435,8 @@ function originGuard(req, res, next) {
 
 function attachSession(req, res, next) {
   const cookies = parseCookies(req.headers.cookie);
-  const rawToken = cookies[sessionCookie];
+  const prefixedName = `__Host-${sessionCookie}`;
+  const rawToken = cookies[prefixedName] || cookies[sessionCookie];
   if (!rawToken) return next();
   const tokenHash = hashToken(rawToken);
   const index = state.sessions.findIndex((item) => item.tokenHash === tokenHash);
@@ -1663,7 +1670,7 @@ app.post('/api/setup', authLimiter, requireSetup, asyncRoute(async (req, res) =>
   const email = normalizeEmail(req.body.email);
   if (!verifyCaptcha(req.body.captchaId, req.body.captchaAnswer)) return res.status(400).json({ error: '验证码错误或已过期' });
   if (!validateUsername(username)) return res.status(400).json({ error: '用户名需为 3-32 位小写字母、数字、点、横线或下划线' });
-  if (!validatePassword(password)) return res.status(400).json({ error: '密码长度需为 8-128 位' });
+  if (!validatePassword(password)) return res.status(400).json({ error: '密码需为 10-128 位，且包含大写字母、小写字母和数字' });
   if (!validateEmail(email)) return res.status(400).json({ error: '邮箱格式不正确' });
   const user = {
     id: randomId(),
@@ -1779,7 +1786,7 @@ app.post('/api/login/email/verify', authLimiter, asyncRoute(async (req, res) => 
 
 app.post('/api/logout', asyncRoute(async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
-  const rawToken = cookies[sessionCookie];
+  const rawToken = cookies[`__Host-${sessionCookie}`] || cookies[sessionCookie];
   const tokenHash = rawToken ? hashToken(rawToken) : '';
   const before = state.sessions.length;
   state.sessions = state.sessions.filter((item) => item.id !== req.session?.id && item.tokenHash !== tokenHash);
@@ -1797,7 +1804,7 @@ app.post('/api/register', authLimiter, asyncRoute(async (req, res) => {
   const password = String(req.body.password || '');
   const email = normalizeEmail(req.body.email);
   if (!validateUsername(username)) return res.status(400).json({ error: '用户名需为 3-32 位小写字母、数字、点、横线或下划线' });
-  if (!validatePassword(password)) return res.status(400).json({ error: '密码长度需为 8-128 位' });
+  if (!validatePassword(password)) return res.status(400).json({ error: '密码需为 10-128 位，且包含大写字母、小写字母和数字' });
   if (!validateEmail(email)) return res.status(400).json({ error: '邮箱格式不正确' });
   if (!email) return res.status(400).json({ error: '注册需要填写邮箱' });
   if (!verifyCaptcha(req.body.captchaId, req.body.captchaAnswer)) return res.status(400).json({ error: '验证码错误或已过期' });
@@ -1955,7 +1962,7 @@ app.post('/api/admin/users', requireAuth, requireAdmin, asyncRoute(async (req, r
     role = 'admin';
   }
   if (!validateUsername(username)) return res.status(400).json({ error: '用户名需为 3-32 位小写字母、数字、点、横线或下划线' });
-  if (!validatePassword(password)) return res.status(400).json({ error: '密码长度需为 8-128 位' });
+  if (!validatePassword(password)) return res.status(400).json({ error: '密码需为 10-128 位，且包含大写字母、小写字母和数字' });
   if (!validateEmail(email)) return res.status(400).json({ error: '邮箱格式不正确' });
   if (state.users.some((item) => item.username === username)) return res.status(409).json({ error: '用户名已存在' });
   if (email && state.users.some((item) => item.email === email)) return res.status(409).json({ error: '邮箱已被其他用户使用' });
@@ -2027,7 +2034,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireAdmin, asyncRoute(async (r
   if (req.body.password !== undefined) {
     if (req.user.role !== 'super_admin' && user.id !== req.user.id) return res.status(403).json({ error: '只有超级管理员可以重置他人密码' });
     const password = String(req.body.password || '');
-    if (!validatePassword(password)) return res.status(400).json({ error: '密码长度需为 8-128 位' });
+    if (!validatePassword(password)) return res.status(400).json({ error: '密码需为 10-128 位，且包含大写字母、小写字母和数字' });
     user.passwordHash = await hashPassword(password);
     // 无条件删除目标用户所有会话
     const isSelf = user.id === req.user.id;
